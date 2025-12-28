@@ -189,7 +189,7 @@ export default function SettingsView() {
 
       {/* About Section */}
       <div className="mt-8 rounded-lg bg-gray-50 p-4 text-center">
-        <h2 className="font-medium text-gray-900">Period Tracker</h2>
+        <h2 className="font-medium text-gray-900">Offline Period Tracker</h2>
         <p className="mt-1 text-sm text-gray-600">
           Privacy-first. 100% offline.
         </p>

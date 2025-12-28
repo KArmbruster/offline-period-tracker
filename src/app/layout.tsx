@@ -14,13 +14,13 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Period Tracker",
+  title: "Offline Period Tracker",
   description: "Privacy-first offline period tracking app",
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
-    title: "Period Tracker",
+    title: "Offline Period Tracker",
   },
 };
 

@@ -1,5 +1,5 @@
 {
-  "name": "Period Tracker",
+  "name": "Offline Period Tracker",
   "short_name": "Period",
   "description": "Privacy-first offline period tracking app",
   "start_url": "/",

@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.privacyfirst.periodtracker',
-  appName: 'Period Tracker',
+  appName: 'Offline Period Tracker',
   webDir: 'out',
   plugins: {
     CapacitorSQLite: {
