@@ -96,36 +96,6 @@ export default function PhaseSymptoms({
         </div>
       </div>
 
-      {/* Next Period Prediction */}
-      {nextPeriodInfo && (
-        <div className="rounded-lg border border-gray-200 bg-white p-4">
-          {nextPeriodInfo.isOverdue ? (
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-phase-menstrual">
-                  Period is {Math.abs(nextPeriodInfo.daysUntil)} days late
-                </span>
-              </div>
-              <p className="text-xs text-gray-500">
-                Tap a date in the calendar to log your period start
-              </p>
-            </div>
-          ) : nextPeriodInfo.daysUntil === 0 ? (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">Period expected:</span>
-              <span className="font-medium text-phase-menstrual">Today</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-gray-500">Next period in:</span>
-              <span className="font-medium text-gray-900">
-                {nextPeriodInfo.daysUntil} {nextPeriodInfo.daysUntil === 1 ? 'day' : 'days'}
-              </span>
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Common Symptoms for Phase */}
       <div className="rounded-lg border border-gray-200 bg-white p-4">
         <div className="mb-2 flex items-center gap-2">
@@ -156,6 +126,36 @@ export default function PhaseSymptoms({
           </p>
         )}
       </div>
+
+      {/* Next Period Prediction */}
+      {nextPeriodInfo && (
+        <div className="rounded-lg border border-gray-200 bg-white p-4">
+          {nextPeriodInfo.isOverdue ? (
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-phase-menstrual">
+                  Period is {Math.abs(nextPeriodInfo.daysUntil)} days late
+                </span>
+              </div>
+              <p className="text-xs text-gray-500">
+                Tap a date in the calendar to log your period start
+              </p>
+            </div>
+          ) : nextPeriodInfo.daysUntil === 0 ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">Period expected:</span>
+              <span className="font-medium text-phase-menstrual">Today</span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-500">Next period in:</span>
+              <span className="font-medium text-gray-900">
+                {nextPeriodInfo.daysUntil} {nextPeriodInfo.daysUntil === 1 ? 'day' : 'days'}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

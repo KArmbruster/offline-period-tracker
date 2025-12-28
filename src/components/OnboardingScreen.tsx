@@ -48,7 +48,7 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
   };
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-white px-6">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-white px-6 safe-area-top">
       <div className="w-full max-w-sm">
         {/* Progress dots */}
         <div className="mb-8 flex justify-center gap-2">

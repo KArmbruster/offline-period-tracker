@@ -107,7 +107,7 @@ export default function PinScreen({ isSetup }: PinScreenProps) {
     : 'Enter your 4-digit PIN to unlock';
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-white px-6">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-white px-6 safe-area-top">
       <div className="w-full max-w-sm">
         {/* Header */}
         <div className="mb-8 text-center">

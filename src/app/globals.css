@@ -184,3 +184,12 @@ input, select, textarea {
     @apply bg-background text-foreground;
   }
 }
+
+/* Safe area insets for mobile browsers */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}

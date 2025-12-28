@@ -13,7 +13,7 @@ import { PhaseType as Phase } from '@/types';
 const DEFAULT_CYCLE_LENGTH = 28;
 const DEFAULT_PERIOD_LENGTH = 5;
 const OVULATION_OFFSET = 14; // Days before next period
-const FERTILE_WINDOW_BEFORE = 4; // Days before ovulation
+const FERTILE_WINDOW_BEFORE = 5; // Days before ovulation
 const FERTILE_WINDOW_AFTER = 1; // Days after ovulation
 
 /**

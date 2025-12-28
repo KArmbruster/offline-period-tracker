@@ -11,7 +11,7 @@ export default function MainApp() {
   const [activeTab, setActiveTab] = useState<TabType>('calendar');
 
   return (
-    <div className="flex min-h-screen flex-col bg-white">
+    <div className="flex min-h-screen flex-col bg-white safe-area-top">
       {/* Main Content */}
       <main className="flex-1 overflow-auto pb-20">
         {activeTab === 'calendar' && <CalendarView />}
@@ -20,7 +20,7 @@ export default function MainApp() {
       </main>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white">
+      <nav className="fixed bottom-0 left-0 right-0 border-t border-gray-200 bg-white safe-area-bottom">
         <div className="flex h-16 items-center justify-around">
           <TabButton
             icon={<CalendarIcon />}

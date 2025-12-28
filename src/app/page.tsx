@@ -12,7 +12,7 @@ export default function Home() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white">
+      <div className="flex min-h-screen items-center justify-center bg-white safe-area-top">
         <div className="text-center">
           <div className="h-12 w-12 animate-spin rounded-full border-4 border-brand-pink border-t-brand-red mx-auto" />
           <p className="mt-4 text-gray-600">Loading...</p>
