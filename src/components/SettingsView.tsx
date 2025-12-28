@@ -78,7 +78,6 @@ export default function SettingsView() {
           cycles: data.cycles,
           symptoms: data.symptoms,
           custom_symptom_types: data.custom_symptom_types,
-          ovulation_markers: data.ovulation_markers,
         });
 
         alert('Data imported successfully!');

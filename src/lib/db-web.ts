@@ -3,13 +3,13 @@
  * Used for development and PWA mode when native SQLite is not available
  */
 
-import type { Cycle, Symptom, CustomSymptomType, OvulationMarker } from '@/types';
+import type { Cycle, Symptom, CustomSymptomType, DayNote } from '@/types';
 
 const STORAGE_KEYS = {
   CYCLES: 'pt_cycles',
   SYMPTOMS: 'pt_symptoms',
   CUSTOM_SYMPTOM_TYPES: 'pt_custom_symptom_types',
-  OVULATION_MARKERS: 'pt_ovulation_markers',
+  DAY_NOTES: 'pt_day_notes',
   INITIALIZED: 'pt_initialized',
 };
 
@@ -19,7 +19,7 @@ class WebDatabaseService {
     cycles: 1,
     symptoms: 1,
     custom_symptom_types: 1,
-    ovulation_markers: 1,
+    day_notes: 1,
   };
 
   async initialize(_passphrase: string): Promise<boolean> {
@@ -39,12 +39,12 @@ class WebDatabaseService {
     const cycles = this.getStoredData<Cycle>(STORAGE_KEYS.CYCLES);
     const symptoms = this.getStoredData<Symptom>(STORAGE_KEYS.SYMPTOMS);
     const customTypes = this.getStoredData<CustomSymptomType>(STORAGE_KEYS.CUSTOM_SYMPTOM_TYPES);
-    const markers = this.getStoredData<OvulationMarker>(STORAGE_KEYS.OVULATION_MARKERS);
+    const dayNotes = this.getStoredData<DayNote>(STORAGE_KEYS.DAY_NOTES);
 
     this.nextIds.cycles = Math.max(1, ...cycles.map(c => c.id + 1), 1);
     this.nextIds.symptoms = Math.max(1, ...symptoms.map(s => s.id + 1), 1);
     this.nextIds.custom_symptom_types = Math.max(1, ...customTypes.map(c => c.id + 1), 1);
-    this.nextIds.ovulation_markers = Math.max(1, ...markers.map(m => m.id + 1), 1);
+    this.nextIds.day_notes = Math.max(1, ...dayNotes.map(n => n.id + 1), 1);
   }
 
   private getStoredData<T>(key: string): T[] {
@@ -77,13 +77,14 @@ class WebDatabaseService {
     return cycles.find(c => c.id === id) || null;
   }
 
-  async addCycle(startDate: string, endDate?: string): Promise<number> {
+  async addCycle(startDate: string, endDate?: string, ovulationDate?: string): Promise<number> {
     const cycles = this.getStoredData<Cycle>(STORAGE_KEYS.CYCLES);
     const id = this.nextIds.cycles++;
     const newCycle: Cycle = {
       id,
       period_start_date: startDate,
       period_end_date: endDate || null,
+      ovulation_date: ovulationDate || null,
       created_at: new Date().toISOString(),
     };
     cycles.push(newCycle);
@@ -91,7 +92,7 @@ class WebDatabaseService {
     return id;
   }
 
-  async updateCycle(id: number, startDate: string, endDate?: string): Promise<void> {
+  async updateCycle(id: number, startDate: string, endDate?: string, ovulationDate?: string): Promise<void> {
     const cycles = this.getStoredData<Cycle>(STORAGE_KEYS.CYCLES);
     const index = cycles.findIndex(c => c.id === id);
     if (index !== -1) {
@@ -99,6 +100,7 @@ class WebDatabaseService {
         ...cycles[index],
         period_start_date: startDate,
         period_end_date: endDate || null,
+        ovulation_date: ovulationDate || null,
       };
       this.setStoredData(STORAGE_KEYS.CYCLES, cycles);
     }
@@ -161,7 +163,7 @@ class WebDatabaseService {
     return types.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async addCustomSymptomType(name: string): Promise<number> {
+  async addCustomSymptomType(name: string, category: 'physical' | 'mood'): Promise<number> {
     const types = this.getStoredData<CustomSymptomType>(STORAGE_KEYS.CUSTOM_SYMPTOM_TYPES);
 
     // Check if already exists
@@ -173,6 +175,7 @@ class WebDatabaseService {
     const newType: CustomSymptomType = {
       id,
       name,
+      category,
       created_at: new Date().toISOString(),
     };
     types.push(newType);
@@ -185,59 +188,44 @@ class WebDatabaseService {
     this.setStoredData(STORAGE_KEYS.CUSTOM_SYMPTOM_TYPES, types.filter(t => t.id !== id));
   }
 
-  // Ovulation Markers
-  async getOvulationMarkerByCycleId(cycleId: number): Promise<OvulationMarker | null> {
-    const markers = this.getStoredData<OvulationMarker>(STORAGE_KEYS.OVULATION_MARKERS);
-    return markers.find(m => m.cycle_id === cycleId) || null;
+  // Day Notes
+  async getNoteByDate(date: string): Promise<DayNote | null> {
+    const notes = this.getStoredData<DayNote>(STORAGE_KEYS.DAY_NOTES);
+    return notes.find(n => n.date === date) || null;
   }
 
-  async getAllOvulationMarkers(): Promise<OvulationMarker[]> {
-    const markers = this.getStoredData<OvulationMarker>(STORAGE_KEYS.OVULATION_MARKERS);
-    return markers.sort((a, b) =>
-      new Date(b.date).getTime() - new Date(a.date).getTime()
-    );
-  }
-
-  async addOvulationMarker(cycleId: number, date: string, isConfirmed: boolean): Promise<number> {
-    const markers = this.getStoredData<OvulationMarker>(STORAGE_KEYS.OVULATION_MARKERS);
-    const id = this.nextIds.ovulation_markers++;
-    const newMarker: OvulationMarker = {
+  async addNote(date: string, content: string): Promise<number> {
+    const notes = this.getStoredData<DayNote>(STORAGE_KEYS.DAY_NOTES);
+    const id = this.nextIds.day_notes++;
+    const now = new Date().toISOString();
+    const newNote: DayNote = {
       id,
-      cycle_id: cycleId,
       date,
-      is_confirmed: isConfirmed,
+      content,
+      created_at: now,
+      updated_at: now,
     };
-    markers.push(newMarker);
-    this.setStoredData(STORAGE_KEYS.OVULATION_MARKERS, markers);
+    notes.push(newNote);
+    this.setStoredData(STORAGE_KEYS.DAY_NOTES, notes);
     return id;
   }
 
-  async updateOvulationMarker(id: number, date: string, isConfirmed: boolean): Promise<void> {
-    const markers = this.getStoredData<OvulationMarker>(STORAGE_KEYS.OVULATION_MARKERS);
-    const index = markers.findIndex(m => m.id === id);
+  async updateNote(id: number, content: string): Promise<void> {
+    const notes = this.getStoredData<DayNote>(STORAGE_KEYS.DAY_NOTES);
+    const index = notes.findIndex(n => n.id === id);
     if (index !== -1) {
-      markers[index] = {
-        ...markers[index],
-        date,
-        is_confirmed: isConfirmed,
+      notes[index] = {
+        ...notes[index],
+        content,
+        updated_at: new Date().toISOString(),
       };
-      this.setStoredData(STORAGE_KEYS.OVULATION_MARKERS, markers);
+      this.setStoredData(STORAGE_KEYS.DAY_NOTES, notes);
     }
   }
 
-  async deleteOvulationMarker(id: number): Promise<void> {
-    const markers = this.getStoredData<OvulationMarker>(STORAGE_KEYS.OVULATION_MARKERS);
-    this.setStoredData(STORAGE_KEYS.OVULATION_MARKERS, markers.filter(m => m.id !== id));
-  }
-
-  async getOvulationMarkerByDate(date: string): Promise<OvulationMarker | null> {
-    const markers = this.getStoredData<OvulationMarker>(STORAGE_KEYS.OVULATION_MARKERS);
-    return markers.find(m => m.date === date) || null;
-  }
-
-  async deleteOvulationMarkerByDate(date: string): Promise<void> {
-    const markers = this.getStoredData<OvulationMarker>(STORAGE_KEYS.OVULATION_MARKERS);
-    this.setStoredData(STORAGE_KEYS.OVULATION_MARKERS, markers.filter(m => m.date !== date));
+  async deleteNote(id: number): Promise<void> {
+    const notes = this.getStoredData<DayNote>(STORAGE_KEYS.DAY_NOTES);
+    this.setStoredData(STORAGE_KEYS.DAY_NOTES, notes.filter(n => n.id !== id));
   }
 
   // Export/Import
@@ -245,13 +233,11 @@ class WebDatabaseService {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
-    ovulation_markers: OvulationMarker[];
   }> {
     return {
       cycles: await this.getAllCycles(),
       symptoms: await this.getAllSymptoms(),
       custom_symptom_types: await this.getAllCustomSymptomTypes(),
-      ovulation_markers: await this.getAllOvulationMarkers(),
     };
   }
 
@@ -259,12 +245,12 @@ class WebDatabaseService {
     localStorage.removeItem(STORAGE_KEYS.CYCLES);
     localStorage.removeItem(STORAGE_KEYS.SYMPTOMS);
     localStorage.removeItem(STORAGE_KEYS.CUSTOM_SYMPTOM_TYPES);
-    localStorage.removeItem(STORAGE_KEYS.OVULATION_MARKERS);
+    localStorage.removeItem(STORAGE_KEYS.DAY_NOTES);
     this.nextIds = {
       cycles: 1,
       symptoms: 1,
       custom_symptom_types: 1,
-      ovulation_markers: 1,
+      day_notes: 1,
     };
   }
 
@@ -272,14 +258,12 @@ class WebDatabaseService {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
-    ovulation_markers: OvulationMarker[];
   }): Promise<void> {
     await this.clearAllData();
 
     this.setStoredData(STORAGE_KEYS.CYCLES, data.cycles);
     this.setStoredData(STORAGE_KEYS.SYMPTOMS, data.symptoms);
     this.setStoredData(STORAGE_KEYS.CUSTOM_SYMPTOM_TYPES, data.custom_symptom_types);
-    this.setStoredData(STORAGE_KEYS.OVULATION_MARKERS, data.ovulation_markers);
 
     this.loadNextIds();
   }

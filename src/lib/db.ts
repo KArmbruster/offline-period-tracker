@@ -1,4 +1,4 @@
-import type { Cycle, Symptom, CustomSymptomType, OvulationMarker } from '@/types';
+import type { Cycle, Symptom, CustomSymptomType, DayNote } from '@/types';
 import { webDb } from './db-web';
 
 // Check if we're running in a native Capacitor environment
@@ -16,8 +16,8 @@ export interface DatabaseInterface {
   close(): Promise<void>;
   getAllCycles(): Promise<Cycle[]>;
   getCycleById(id: number): Promise<Cycle | null>;
-  addCycle(startDate: string, endDate?: string): Promise<number>;
-  updateCycle(id: number, startDate: string, endDate?: string): Promise<void>;
+  addCycle(startDate: string, endDate?: string, ovulationDate?: string): Promise<number>;
+  updateCycle(id: number, startDate: string, endDate?: string, ovulationDate?: string): Promise<void>;
   deleteCycle(id: number): Promise<void>;
   getCycleByDate(date: string): Promise<Cycle | null>;
   getSymptomsByDate(date: string): Promise<Symptom[]>;
@@ -26,27 +26,22 @@ export interface DatabaseInterface {
   addSymptom(date: string, symptomType: string, cycleId?: number, notes?: string): Promise<number>;
   deleteSymptom(id: number): Promise<void>;
   getAllCustomSymptomTypes(): Promise<CustomSymptomType[]>;
-  addCustomSymptomType(name: string): Promise<number>;
+  addCustomSymptomType(name: string, category: 'physical' | 'mood'): Promise<number>;
   deleteCustomSymptomType(id: number): Promise<void>;
-  getOvulationMarkerByCycleId(cycleId: number): Promise<OvulationMarker | null>;
-  getOvulationMarkerByDate(date: string): Promise<OvulationMarker | null>;
-  getAllOvulationMarkers(): Promise<OvulationMarker[]>;
-  addOvulationMarker(cycleId: number, date: string, isConfirmed: boolean): Promise<number>;
-  updateOvulationMarker(id: number, date: string, isConfirmed: boolean): Promise<void>;
-  deleteOvulationMarker(id: number): Promise<void>;
-  deleteOvulationMarkerByDate(date: string): Promise<void>;
+  getNoteByDate(date: string): Promise<DayNote | null>;
+  addNote(date: string, content: string): Promise<number>;
+  updateNote(id: number, content: string): Promise<void>;
+  deleteNote(id: number): Promise<void>;
   exportAllData(): Promise<{
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
-    ovulation_markers: OvulationMarker[];
   }>;
   clearAllData(): Promise<void>;
   importData(data: {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
-    ovulation_markers: OvulationMarker[];
   }): Promise<void>;
   isReady(): boolean;
 }
@@ -132,6 +127,7 @@ class NativeDatabaseService implements DatabaseInterface {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         period_start_date TEXT NOT NULL,
         period_end_date TEXT,
+        ovulation_date TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
@@ -152,18 +148,19 @@ class NativeDatabaseService implements DatabaseInterface {
       CREATE TABLE IF NOT EXISTS custom_symptom_types (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL UNIQUE,
+        category TEXT NOT NULL DEFAULT 'physical',
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
-      CREATE TABLE IF NOT EXISTS ovulation_markers (
+      CREATE TABLE IF NOT EXISTS day_notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        cycle_id INTEGER NOT NULL,
-        date TEXT NOT NULL,
-        is_confirmed INTEGER NOT NULL DEFAULT 0,
-        FOREIGN KEY (cycle_id) REFERENCES cycles(id) ON DELETE CASCADE
+        date TEXT NOT NULL UNIQUE,
+        content TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       );
 
-      CREATE INDEX IF NOT EXISTS idx_ovulation_cycle_id ON ovulation_markers(cycle_id);
+      CREATE INDEX IF NOT EXISTS idx_day_notes_date ON day_notes(date);
     `;
 
     await db.execute(migrations);
@@ -191,20 +188,20 @@ class NativeDatabaseService implements DatabaseInterface {
     return (result.values?.[0] as Cycle) || null;
   }
 
-  async addCycle(startDate: string, endDate?: string): Promise<number> {
+  async addCycle(startDate: string, endDate?: string, ovulationDate?: string): Promise<number> {
     const db = this.getDb();
     const result = await db.run(
-      'INSERT INTO cycles (period_start_date, period_end_date) VALUES (?, ?)',
-      [startDate, endDate || null]
+      'INSERT INTO cycles (period_start_date, period_end_date, ovulation_date) VALUES (?, ?, ?)',
+      [startDate, endDate || null, ovulationDate || null]
     );
     return result.changes?.lastId || 0;
   }
 
-  async updateCycle(id: number, startDate: string, endDate?: string): Promise<void> {
+  async updateCycle(id: number, startDate: string, endDate?: string, ovulationDate?: string): Promise<void> {
     const db = this.getDb();
     await db.run(
-      'UPDATE cycles SET period_start_date = ?, period_end_date = ? WHERE id = ?',
-      [startDate, endDate || null, id]
+      'UPDATE cycles SET period_start_date = ?, period_end_date = ?, ovulation_date = ? WHERE id = ?',
+      [startDate, endDate || null, ovulationDate || null, id]
     );
   }
 
@@ -265,11 +262,11 @@ class NativeDatabaseService implements DatabaseInterface {
     return (result.values || []) as CustomSymptomType[];
   }
 
-  async addCustomSymptomType(name: string): Promise<number> {
+  async addCustomSymptomType(name: string, category: 'physical' | 'mood'): Promise<number> {
     const db = this.getDb();
     const result = await db.run(
-      'INSERT OR IGNORE INTO custom_symptom_types (name) VALUES (?)',
-      [name]
+      'INSERT OR IGNORE INTO custom_symptom_types (name, category) VALUES (?, ?)',
+      [name, category]
     );
     return result.changes?.lastId || 0;
   }
@@ -279,50 +276,33 @@ class NativeDatabaseService implements DatabaseInterface {
     await db.run('DELETE FROM custom_symptom_types WHERE id = ?', [id]);
   }
 
-  // Ovulation Markers
-  async getOvulationMarkerByCycleId(cycleId: number): Promise<OvulationMarker | null> {
+  // Day Notes
+  async getNoteByDate(date: string): Promise<DayNote | null> {
     const db = this.getDb();
-    const result = await db.query('SELECT * FROM ovulation_markers WHERE cycle_id = ?', [cycleId]);
-    return (result.values?.[0] as OvulationMarker) || null;
+    const result = await db.query('SELECT * FROM day_notes WHERE date = ?', [date]);
+    return (result.values?.[0] as DayNote) || null;
   }
 
-  async getAllOvulationMarkers(): Promise<OvulationMarker[]> {
-    const db = this.getDb();
-    const result = await db.query('SELECT * FROM ovulation_markers ORDER BY date DESC');
-    return (result.values || []) as OvulationMarker[];
-  }
-
-  async addOvulationMarker(cycleId: number, date: string, isConfirmed: boolean): Promise<number> {
+  async addNote(date: string, content: string): Promise<number> {
     const db = this.getDb();
     const result = await db.run(
-      'INSERT INTO ovulation_markers (cycle_id, date, is_confirmed) VALUES (?, ?, ?)',
-      [cycleId, date, isConfirmed ? 1 : 0]
+      'INSERT INTO day_notes (date, content) VALUES (?, ?)',
+      [date, content]
     );
     return result.changes?.lastId || 0;
   }
 
-  async updateOvulationMarker(id: number, date: string, isConfirmed: boolean): Promise<void> {
+  async updateNote(id: number, content: string): Promise<void> {
     const db = this.getDb();
     await db.run(
-      'UPDATE ovulation_markers SET date = ?, is_confirmed = ? WHERE id = ?',
-      [date, isConfirmed ? 1 : 0, id]
+      "UPDATE day_notes SET content = ?, updated_at = datetime('now') WHERE id = ?",
+      [content, id]
     );
   }
 
-  async deleteOvulationMarker(id: number): Promise<void> {
+  async deleteNote(id: number): Promise<void> {
     const db = this.getDb();
-    await db.run('DELETE FROM ovulation_markers WHERE id = ?', [id]);
-  }
-
-  async getOvulationMarkerByDate(date: string): Promise<OvulationMarker | null> {
-    const db = this.getDb();
-    const result = await db.query('SELECT * FROM ovulation_markers WHERE date = ?', [date]);
-    return (result.values?.[0] as OvulationMarker) || null;
-  }
-
-  async deleteOvulationMarkerByDate(date: string): Promise<void> {
-    const db = this.getDb();
-    await db.run('DELETE FROM ovulation_markers WHERE date = ?', [date]);
+    await db.run('DELETE FROM day_notes WHERE id = ?', [id]);
   }
 
   // Export/Import
@@ -330,19 +310,16 @@ class NativeDatabaseService implements DatabaseInterface {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
-    ovulation_markers: OvulationMarker[];
   }> {
     const cycles = await this.getAllCycles();
     const symptoms = await this.getAllSymptoms();
     const custom_symptom_types = await this.getAllCustomSymptomTypes();
-    const ovulation_markers = await this.getAllOvulationMarkers();
 
-    return { cycles, symptoms, custom_symptom_types, ovulation_markers };
+    return { cycles, symptoms, custom_symptom_types };
   }
 
   async clearAllData(): Promise<void> {
     const db = this.getDb();
-    await db.execute('DELETE FROM ovulation_markers');
     await db.execute('DELETE FROM symptoms');
     await db.execute('DELETE FROM custom_symptom_types');
     await db.execute('DELETE FROM cycles');
@@ -352,7 +329,6 @@ class NativeDatabaseService implements DatabaseInterface {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
-    ovulation_markers: OvulationMarker[];
   }): Promise<void> {
     const db = this.getDb();
 
@@ -362,8 +338,8 @@ class NativeDatabaseService implements DatabaseInterface {
     // Import cycles
     for (const cycle of data.cycles) {
       await db.run(
-        'INSERT INTO cycles (id, period_start_date, period_end_date, created_at) VALUES (?, ?, ?, ?)',
-        [cycle.id, cycle.period_start_date, cycle.period_end_date, cycle.created_at]
+        'INSERT INTO cycles (id, period_start_date, period_end_date, ovulation_date, created_at) VALUES (?, ?, ?, ?, ?)',
+        [cycle.id, cycle.period_start_date, cycle.period_end_date, cycle.ovulation_date, cycle.created_at]
       );
     }
 
@@ -380,14 +356,6 @@ class NativeDatabaseService implements DatabaseInterface {
       await db.run(
         'INSERT INTO custom_symptom_types (id, name, created_at) VALUES (?, ?, ?)',
         [customType.id, customType.name, customType.created_at]
-      );
-    }
-
-    // Import ovulation markers
-    for (const marker of data.ovulation_markers) {
-      await db.run(
-        'INSERT INTO ovulation_markers (id, cycle_id, date, is_confirmed) VALUES (?, ?, ?, ?)',
-        [marker.id, marker.cycle_id, marker.date, marker.is_confirmed ? 1 : 0]
       );
     }
   }

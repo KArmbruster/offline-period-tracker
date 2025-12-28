@@ -29,8 +29,9 @@ import {
   getFertileWindow,
   getOvulationDate,
 } from '@/lib/cycle-logic';
-import type { Cycle, Symptom, PhaseType, OvulationMarker } from '@/types';
+import type { Cycle, Symptom, PhaseType, CustomSymptomType, DayNote } from '@/types';
 import { PhaseType as Phase, SymptomType } from '@/types';
+import { Input } from '@/components/ui/input';
 import {
   Drawer,
   DrawerContent,
@@ -87,19 +88,12 @@ type DayType = 'none' | 'period_start' | 'period_end' | 'ovulation';
 function isInFertileWindow(
   date: Date,
   cycles: Cycle[],
-  cycleLength: number,
-  ovulationMarkers: OvulationMarker[]
+  cycleLength: number
 ): boolean {
   const cycle = findCycleForDate(date, cycles);
   if (!cycle) return false;
 
-  // Check if there's a confirmed ovulation marker for this cycle
-  const marker = ovulationMarkers.find((m) => m.cycle_id === cycle.id);
-  const ovulationDate = getOvulationDate(
-    cycle.period_start_date,
-    cycleLength,
-    marker
-  );
+  const ovulationDate = getOvulationDate(cycle, cycleLength);
   const fertileWindow = getFertileWindow(ovulationDate);
 
   return isWithinInterval(date, {
@@ -113,7 +107,6 @@ function getDayPhaseForDate(
   date: Date,
   cycles: Cycle[],
   cycleLength: number,
-  ovulationMarkers: OvulationMarker[],
   averagePeriodLength: number = 5
 ): { phase: PhaseType | null; isPrediction: boolean } {
   if (cycles.length === 0) {
@@ -162,10 +155,7 @@ function getDayPhaseForDate(
       ? parseISO(nextCycle.period_start_date)
       : null;
 
-    // Find ovulation marker for this cycle
-    const ovulationMarker = ovulationMarkers.find((m) => m.cycle_id === cycle.id);
-
-    const phase = getPhaseForDate(date, cycle, nextCycleStart, cycleLength, ovulationMarker);
+    const phase = getPhaseForDate(date, cycle, nextCycleStart, cycleLength);
     // Mark as prediction (transparent) only if it's a future date
     return {
       phase,
@@ -192,21 +182,30 @@ export default function CalendarView() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [symptoms, setSymptoms] = useState<Symptom[]>([]);
-  const [ovulationMarkers, setOvulationMarkers] = useState<OvulationMarker[]>([]);
+  const [customSymptomTypes, setCustomSymptomTypes] = useState<CustomSymptomType[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Custom symptom creation state
+  const [isCreatingCustomSymptom, setIsCreatingCustomSymptom] = useState(false);
+  const [newSymptomCategory, setNewSymptomCategory] = useState<'physical' | 'mood' | null>(null);
+  const [newSymptomName, setNewSymptomName] = useState('');
+
+  // Day note state
+  const [dayNote, setDayNote] = useState<DayNote | null>(null);
+  const [noteText, setNoteText] = useState('');
+
   const loadData = useCallback(async () => {
     try {
-      const [allCycles, allSymptoms, allMarkers] = await Promise.all([
+      const [allCycles, allSymptoms, allCustomTypes] = await Promise.all([
         db.getAllCycles(),
         db.getAllSymptoms(),
-        db.getAllOvulationMarkers(),
+        db.getAllCustomSymptomTypes(),
       ]);
       setCycles(allCycles);
       setSymptoms(allSymptoms);
-      setOvulationMarkers(allMarkers);
+      setCustomSymptomTypes(allCustomTypes);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -230,9 +229,9 @@ export default function CalendarView() {
   // Get today's phase and historical symptoms for that phase
   const todayPhase = useMemo(() => {
     const today = new Date();
-    const result = getDayPhaseForDate(today, cycles, cycleLength, ovulationMarkers, periodLength);
+    const result = getDayPhaseForDate(today, cycles, cycleLength, periodLength);
     return result.phase;
-  }, [cycles, cycleLength, ovulationMarkers, periodLength]);
+  }, [cycles, cycleLength, periodLength]);
 
   const phaseSymptoms = useMemo(() => {
     if (!todayPhase) return [];
@@ -251,7 +250,7 @@ export default function CalendarView() {
 
   const getDayPhaseInfo = useCallback(
     (date: Date): { phase: PhaseType | null; isPrediction: boolean; isFertile: boolean } => {
-      const { phase, isPrediction } = getDayPhaseForDate(date, cycles, cycleLength, ovulationMarkers, periodLength);
+      const { phase, isPrediction } = getDayPhaseForDate(date, cycles, cycleLength, periodLength);
 
       // For recorded cycles, use actual fertile window calculation
       // For predictions, derive fertile from the phase
@@ -259,7 +258,7 @@ export default function CalendarView() {
 
       if (!isPrediction) {
         // Use actual cycle data for past/present days
-        isFertile = isInFertileWindow(date, cycles, cycleLength, ovulationMarkers);
+        isFertile = isInFertileWindow(date, cycles, cycleLength);
       } else {
         // For predicted days, derive from phase
         isFertile = phase === Phase.FERTILE;
@@ -267,7 +266,7 @@ export default function CalendarView() {
 
       return { phase, isPrediction, isFertile };
     },
-    [cycles, cycleLength, periodLength, ovulationMarkers]
+    [cycles, cycleLength, periodLength]
   );
 
   // Get the background color for a phase (used for fertile days too)
@@ -323,12 +322,29 @@ export default function CalendarView() {
     }
   };
 
-  const handleDayClick = (date: Date) => {
+  const handleDayClick = async (date: Date) => {
     // Don't open drawer for future dates
     if (isFutureDate(date)) return;
 
     setSelectedDate(date);
     setIsDrawerOpen(true);
+
+    // Reset custom symptom creation state
+    setIsCreatingCustomSymptom(false);
+    setNewSymptomCategory(null);
+    setNewSymptomName('');
+
+    // Load note for this date
+    try {
+      const dateStr = format(date, 'yyyy-MM-dd');
+      const note = await db.getNoteByDate(dateStr);
+      setDayNote(note);
+      setNoteText(note?.content || '');
+    } catch (error) {
+      console.error('Failed to load note:', error);
+      setDayNote(null);
+      setNoteText('');
+    }
   };
 
   // Get the current day type (none, period_start, period_end, ovulation)
@@ -343,11 +359,11 @@ export default function CalendarView() {
     if (cycles.some((c) => c.period_end_date === dateStr)) {
       return 'period_end';
     }
-    if (ovulationMarkers.some((m) => m.date === dateStr)) {
+    if (cycles.some((c) => c.ovulation_date === dateStr)) {
       return 'ovulation';
     }
     return 'none';
-  }, [selectedDate, cycles, ovulationMarkers]);
+  }, [selectedDate, cycles]);
 
   const selectedDayType = getSelectedDayType();
 
@@ -365,9 +381,10 @@ export default function CalendarView() {
         if (cycle) await db.deleteCycle(cycle.id);
       } else if (currentType === 'period_end') {
         const cycle = cycles.find((c) => c.period_end_date === dateStr);
-        if (cycle) await db.updateCycle(cycle.id, cycle.period_start_date, undefined);
+        if (cycle) await db.updateCycle(cycle.id, cycle.period_start_date, undefined, cycle.ovulation_date || undefined);
       } else if (currentType === 'ovulation') {
-        await db.deleteOvulationMarkerByDate(dateStr);
+        const cycle = cycles.find((c) => c.ovulation_date === dateStr);
+        if (cycle) await db.updateCycle(cycle.id, cycle.period_start_date, cycle.period_end_date || undefined, undefined);
       }
 
       // Then, add the new marker if not 'none'
@@ -377,18 +394,14 @@ export default function CalendarView() {
         // Find the cycle this date belongs to
         const cycle = findCycleForDate(selectedDate, cycles);
         if (cycle) {
-          await db.updateCycle(cycle.id, cycle.period_start_date, dateStr);
+          await db.updateCycle(cycle.id, cycle.period_start_date, dateStr, cycle.ovulation_date || undefined);
         }
       } else if (newType === 'ovulation') {
         // Find the cycle this date belongs to
         const cycle = findCycleForDate(selectedDate, cycles);
         if (cycle) {
-          // Delete existing ovulation marker for this cycle if any (replace behavior)
-          const existingMarker = ovulationMarkers.find((m) => m.cycle_id === cycle.id);
-          if (existingMarker) {
-            await db.deleteOvulationMarker(existingMarker.id);
-          }
-          await db.addOvulationMarker(cycle.id, dateStr, true);
+          // Update cycle with the new ovulation date (replaces any existing)
+          await db.updateCycle(cycle.id, cycle.period_start_date, cycle.period_end_date || undefined, dateStr);
         }
       }
 
@@ -418,11 +431,11 @@ export default function CalendarView() {
       const dateStr = format(date, 'yyyy-MM-dd');
       const hasPeriodStart = cycles.some((c) => c.period_start_date === dateStr);
       const hasPeriodEnd = cycles.some((c) => c.period_end_date === dateStr);
-      const hasOvulation = ovulationMarkers.some((m) => m.date === dateStr);
+      const hasOvulation = cycles.some((c) => c.ovulation_date === dateStr);
       const hasSymptoms = symptoms.some((s) => s.date === dateStr);
       return hasPeriodStart || hasPeriodEnd || hasOvulation || hasSymptoms;
     },
-    [cycles, symptoms, ovulationMarkers]
+    [cycles, symptoms]
   );
 
   // Toggle a symptom for the selected date
@@ -452,6 +465,56 @@ export default function CalendarView() {
   const isSymptomSelected = (symptomType: string): boolean => {
     return selectedDateInfo.symptoms.some((s) => s.symptom_type === symptomType);
   };
+
+  // Handle creating a custom symptom
+  const handleCreateCustomSymptom = async () => {
+    if (!newSymptomName.trim() || !newSymptomCategory) return;
+
+    try {
+      await db.addCustomSymptomType(newSymptomName.trim(), newSymptomCategory);
+      await loadData();
+      setIsCreatingCustomSymptom(false);
+      setNewSymptomCategory(null);
+      setNewSymptomName('');
+    } catch (error) {
+      console.error('Failed to create custom symptom:', error);
+    }
+  };
+
+  // Handle note save (on blur or explicit save)
+  const handleSaveNote = async () => {
+    if (!selectedDate) return;
+
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const trimmedNote = noteText.trim();
+
+    try {
+      if (dayNote) {
+        // Update or delete existing note
+        if (trimmedNote) {
+          await db.updateNote(dayNote.id, trimmedNote);
+        } else {
+          await db.deleteNote(dayNote.id);
+          setDayNote(null);
+        }
+      } else if (trimmedNote) {
+        // Create new note
+        await db.addNote(dateStr, trimmedNote);
+        const newNote = await db.getNoteByDate(dateStr);
+        setDayNote(newNote);
+      }
+    } catch (error) {
+      console.error('Failed to save note:', error);
+    }
+  };
+
+  // Get custom symptoms grouped by category
+  const customSymptomsByCategory = useMemo(() => {
+    return {
+      physical: customSymptomTypes.filter((c) => c.category === 'physical'),
+      mood: customSymptomTypes.filter((c) => c.category === 'mood'),
+    };
+  }, [customSymptomTypes]);
 
   // Check if period end button should be enabled
   const canSetPeriodEnd = useCallback((): boolean => {
@@ -653,28 +716,181 @@ export default function CalendarView() {
 
             {/* Symptoms */}
             <div className="space-y-4">
-              {Object.entries(SYMPTOM_CATEGORIES).map(([key, category]) => (
-                <div key={key}>
-                  <h3 className="mb-2 text-sm font-medium text-gray-500">
-                    {category.label}
-                  </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {category.symptoms.map(({ type, label }) => (
-                      <button
-                        key={type}
-                        onClick={() => handleToggleSymptom(type)}
-                        className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
-                          isSymptomSelected(type)
-                            ? 'bg-brand-fuchsia text-white'
-                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
+              {/* Physical symptoms */}
+              <div>
+                <h3 className="mb-2 text-sm font-medium text-gray-500">
+                  {SYMPTOM_CATEGORIES.physical.label}
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {SYMPTOM_CATEGORIES.physical.symptoms.map(({ type, label }) => (
+                    <button
+                      key={type}
+                      onClick={() => handleToggleSymptom(type)}
+                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
+                        isSymptomSelected(type)
+                          ? 'bg-brand-fuchsia text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  {/* Custom physical symptoms */}
+                  {customSymptomsByCategory.physical.map((custom) => (
+                    <button
+                      key={`custom-${custom.id}`}
+                      onClick={() => handleToggleSymptom(`custom_${custom.id}`)}
+                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
+                        isSymptomSelected(`custom_${custom.id}`)
+                          ? 'bg-brand-fuchsia text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {custom.name}
+                    </button>
+                  ))}
                 </div>
-              ))}
+              </div>
+
+              {/* Flow symptoms */}
+              <div>
+                <h3 className="mb-2 text-sm font-medium text-gray-500">
+                  {SYMPTOM_CATEGORIES.flow.label}
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {SYMPTOM_CATEGORIES.flow.symptoms.map(({ type, label }) => (
+                    <button
+                      key={type}
+                      onClick={() => handleToggleSymptom(type)}
+                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
+                        isSymptomSelected(type)
+                          ? 'bg-brand-fuchsia text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Mood symptoms */}
+              <div>
+                <h3 className="mb-2 text-sm font-medium text-gray-500">
+                  {SYMPTOM_CATEGORIES.mood.label}
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {SYMPTOM_CATEGORIES.mood.symptoms.map(({ type, label }) => (
+                    <button
+                      key={type}
+                      onClick={() => handleToggleSymptom(type)}
+                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
+                        isSymptomSelected(type)
+                          ? 'bg-brand-fuchsia text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                  {/* Custom mood symptoms */}
+                  {customSymptomsByCategory.mood.map((custom) => (
+                    <button
+                      key={`custom-${custom.id}`}
+                      onClick={() => handleToggleSymptom(`custom_${custom.id}`)}
+                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
+                        isSymptomSelected(`custom_${custom.id}`)
+                          ? 'bg-brand-fuchsia text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {custom.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Add Custom Symptom Button / Form */}
+              <div className="pt-2">
+                {!isCreatingCustomSymptom ? (
+                  <button
+                    onClick={() => setIsCreatingCustomSymptom(true)}
+                    className="flex items-center gap-1 text-sm text-brand-fuchsia hover:text-brand-red"
+                  >
+                    <PlusIcon />
+                    Add custom symptom
+                  </button>
+                ) : (
+                  <div className="space-y-3 rounded-lg border border-gray-200 p-3">
+                    {/* Category selection */}
+                    {!newSymptomCategory ? (
+                      <div>
+                        <p className="mb-2 text-sm text-gray-600">Select category:</p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setNewSymptomCategory('physical')}
+                            className="rounded-full bg-gray-100 px-4 py-2 text-sm text-gray-700 hover:bg-gray-200"
+                          >
+                            Physical
+                          </button>
+                          <button
+                            onClick={() => setNewSymptomCategory('mood')}
+                            className="rounded-full bg-gray-100 px-4 py-2 text-sm text-gray-700 hover:bg-gray-200"
+                          >
+                            Mood
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="mb-2 text-sm text-gray-600">
+                          New {newSymptomCategory} symptom:
+                        </p>
+                        <div className="flex gap-2">
+                          <Input
+                            type="text"
+                            value={newSymptomName}
+                            onChange={(e) => setNewSymptomName(e.target.value)}
+                            placeholder="Symptom name"
+                            className="flex-1 text-base"
+                            autoFocus
+                          />
+                          <button
+                            onClick={handleCreateCustomSymptom}
+                            disabled={!newSymptomName.trim()}
+                            className="rounded-lg bg-brand-fuchsia px-4 py-2 text-sm text-white hover:bg-brand-red disabled:opacity-50"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      onClick={() => {
+                        setIsCreatingCustomSymptom(false);
+                        setNewSymptomCategory(null);
+                        setNewSymptomName('');
+                      }}
+                      className="text-sm text-gray-500 hover:text-gray-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Notes Section */}
+            <div className="mt-6 border-t border-gray-200 pt-4">
+              <h3 className="mb-2 text-sm font-medium text-gray-500">Note</h3>
+              <textarea
+                value={noteText}
+                onChange={(e) => setNoteText(e.target.value)}
+                onBlur={handleSaveNote}
+                placeholder="Add a note for this day..."
+                className="w-full rounded-lg border border-gray-200 p-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-brand-fuchsia focus:outline-none focus:ring-1 focus:ring-brand-fuchsia"
+                rows={3}
+              />
             </div>
           </div>
         </DrawerContent>
@@ -740,6 +956,19 @@ function PenIcon() {
     >
       <path d="m5.433 13.917 1.262-3.155A4 4 0 0 1 7.58 9.42l6.92-6.918a2.121 2.121 0 0 1 3 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 0 1-.65-.65Z" />
       <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0 0 10 3H4.75A2.75 2.75 0 0 0 2 5.75v9.5A2.75 2.75 0 0 0 4.75 18h9.5A2.75 2.75 0 0 0 17 15.25V10a.75.75 0 0 0-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5Z" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      className="h-4 w-4"
+    >
+      <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
     </svg>
   );
 }

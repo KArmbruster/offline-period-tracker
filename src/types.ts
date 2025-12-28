@@ -43,6 +43,7 @@ export interface Cycle {
   id: number;
   period_start_date: string; // ISO 8601 YYYY-MM-DD
   period_end_date: string | null;
+  ovulation_date: string | null; // ISO 8601 YYYY-MM-DD
   created_at: string;
 }
 
@@ -57,15 +58,18 @@ export interface Symptom {
 export interface CustomSymptomType {
   id: number;
   name: string;
+  category: 'physical' | 'mood';
   created_at: string;
 }
 
-export interface OvulationMarker {
+export interface DayNote {
   id: number;
-  cycle_id: number;
   date: string; // ISO 8601 YYYY-MM-DD
-  is_confirmed: boolean;
+  content: string;
+  created_at: string;
+  updated_at: string;
 }
+
 
 // App State
 export interface AppState {
@@ -80,7 +84,6 @@ export interface ExportData {
   cycles: Cycle[];
   symptoms: Symptom[];
   custom_symptom_types: CustomSymptomType[];
-  ovulation_markers: OvulationMarker[];
 }
 
 // Insights
@@ -103,5 +106,5 @@ export interface DayInfo {
   symptoms: Symptom[];
   hasPeriodStart: boolean;
   hasPeriodEnd: boolean;
-  hasOvulationMarker: boolean;
+  hasOvulationDate: boolean;
 }

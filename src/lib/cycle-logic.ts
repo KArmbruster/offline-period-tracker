@@ -7,7 +7,7 @@ import {
   startOfDay,
   isSameDay,
 } from 'date-fns';
-import type { Cycle, OvulationMarker, PhaseType } from '@/types';
+import type { Cycle, PhaseType } from '@/types';
 import { PhaseType as Phase } from '@/types';
 
 const DEFAULT_CYCLE_LENGTH = 28;
@@ -86,18 +86,18 @@ export function calculateAveragePeriodDuration(cycles: Cycle[]): number | null {
 
 /**
  * Get ovulation date for a cycle
+ * Uses cycle.ovulation_date if set, otherwise estimates based on cycle length
  */
 export function getOvulationDate(
-  cycleStartDate: string,
-  cycleLength: number,
-  confirmedOvulation?: OvulationMarker
+  cycle: Cycle,
+  cycleLength: number
 ): Date {
-  if (confirmedOvulation?.is_confirmed) {
-    return parseISO(confirmedOvulation.date);
+  if (cycle.ovulation_date) {
+    return parseISO(cycle.ovulation_date);
   }
 
   // Estimate: cycle length - 14 days
-  const start = parseISO(cycleStartDate);
+  const start = parseISO(cycle.period_start_date);
   return addDays(start, cycleLength - OVULATION_OFFSET);
 }
 
@@ -118,8 +118,7 @@ export function getPhaseForDate(
   date: Date,
   currentCycle: Cycle | null,
   nextCycleStart: Date | null,
-  cycleLength: number,
-  ovulationMarker?: OvulationMarker
+  cycleLength: number
 ): PhaseType | null {
   if (!currentCycle) {
     return null;
@@ -139,12 +138,8 @@ export function getPhaseForDate(
     return Phase.MENSTRUAL;
   }
 
-  // Calculate ovulation
-  const ovulationDate = getOvulationDate(
-    currentCycle.period_start_date,
-    cycleLength,
-    ovulationMarker
-  );
+  // Calculate ovulation (uses cycle.ovulation_date if set, otherwise estimates)
+  const ovulationDate = getOvulationDate(currentCycle, cycleLength);
 
   // Check if ovulation day
   if (isSameDay(date, ovulationDate)) {
