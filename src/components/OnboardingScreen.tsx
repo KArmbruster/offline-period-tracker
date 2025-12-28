@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 
+const basePath = process.env.NODE_ENV === 'production' ? '/offline-period-tracker' : '';
+
 interface OnboardingScreenProps {
   onComplete: () => void;
 }
@@ -50,6 +52,15 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-white px-6 safe-area-top">
       <div className="w-full max-w-sm">
+        {/* App Icon */}
+        <div className="mb-6 flex justify-center">
+          <img
+            src={`${basePath}/icons/icon-192.png`}
+            alt="Period Tracker"
+            className="h-24 w-24"
+          />
+        </div>
+
         {/* Progress dots */}
         <div className="mb-8 flex justify-center gap-2">
           {slides.map((_, i) => (

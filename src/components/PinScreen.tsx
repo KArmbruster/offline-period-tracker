@@ -5,6 +5,8 @@ import { useApp } from '@/context/AppContext';
 import { validatePinFormat } from '@/lib/crypto';
 import { Button } from '@/components/ui/button';
 
+const basePath = process.env.NODE_ENV === 'production' ? '/offline-period-tracker' : '';
+
 interface PinScreenProps {
   isSetup: boolean;
 }
@@ -109,6 +111,15 @@ export default function PinScreen({ isSetup }: PinScreenProps) {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-white px-6 safe-area-top">
       <div className="w-full max-w-sm">
+        {/* App Icon */}
+        <div className="mb-6 flex justify-center">
+          <img
+            src={`${basePath}/icons/icon-192.png`}
+            alt="Period Tracker"
+            className="h-20 w-20"
+          />
+        </div>
+
         {/* Header */}
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-semibold text-gray-900">{title}</h1>

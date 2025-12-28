@@ -49,9 +49,11 @@ src/
 │   ├── InsightsView.tsx     # Statistics and symptom history
 │   ├── SettingsView.tsx     # PIN change, export/import, reset
 │   ├── MainApp.tsx          # Tab navigation container
-│   ├── OnboardingScreen.tsx # First-launch PIN setup
-│   ├── PinScreen.tsx        # PIN entry for unlock
-│   └── PhaseSymptoms.tsx    # Today's phase symptom display
+│   ├── OnboardingScreen.tsx # First-launch introduction slides
+│   ├── PinScreen.tsx        # PIN entry for unlock/setup
+│   ├── PhaseSymptoms.tsx    # Today's phase symptom display
+│   ├── UserGuide.tsx        # In-app user guide with privacy info
+│   └── ServiceWorkerRegistration.tsx # PWA service worker
 ├── context/
 │   └── AppContext.tsx       # Global app state (unlock, first launch)
 ├── lib/
@@ -241,10 +243,36 @@ For each phase (Menstrual, Follicular, Ovulation, Luteal):
 ## Settings View
 
 ### Options
+- User Guide (in-app help with privacy info)
 - Change PIN
 - Export Data (JSON backup file)
 - Import Data (destructive restore)
 - Reset App (delete all data)
+
+## User Guide
+
+Accessible from Settings > User Guide. Contains:
+
+### Privacy Information
+- 100% Offline operation (no servers, no cloud)
+- Local storage only (browser localStorage or encrypted SQLite)
+- PIN protection encrypts data
+- No recovery mechanism (intentional for privacy)
+- Zero analytics or tracking
+
+### Feature Documentation
+- Calendar View navigation
+- Logging period start/end/ovulation
+- Symptom tracking (default and custom)
+- Daily notes
+- Cycle predictions
+- Insights and statistics
+- Data export/import
+- PIN management
+
+### Visual Guides
+- Calendar color legend (phase colors)
+- Calendar icon meanings (circle, star, pen)
 
 ## Data Export/Import
 
@@ -282,6 +310,8 @@ For each phase (Menstrual, Follicular, Ovulation, Luteal):
 - **Language**: English only
 - **Notifications**: None
 - **No Emojis**: Unless explicitly requested by user
+- **Safe Areas**: Use `safe-area-top` and `safe-area-bottom` classes for mobile browser chrome
+- **Viewport**: Uses `viewport-fit: cover` to enable safe area insets
 
 ## Development Commands
 ```bash
@@ -316,8 +346,10 @@ npx cap run android      # Run on Android device/emulator
 - [x] Day notes
 - [x] Insights view with statistics
 - [x] Common symptoms by phase
-- [x] Phase symptoms display
+- [x] Phase symptoms display (current phase, common symptoms, next period countdown)
 - [x] Settings page
+- [x] User guide with privacy info
 - [x] Data export/import
 - [x] PWA configuration
+- [x] Mobile safe area handling (browser chrome)
 - [ ] Capacitor mobile builds (not yet tested)
