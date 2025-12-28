@@ -9,7 +9,7 @@ import {
   getSymptomsForPhaseHistory,
   type PhaseSymptomHistory,
 } from '@/lib/cycle-logic';
-import type { Cycle, Symptom } from '@/types';
+import type { Cycle, Symptom, CustomSymptomType } from '@/types';
 import { PhaseType } from '@/types';
 
 const PHASE_INFO: Record<PhaseType, { name: string; color: string; bgColor: string }> = {
@@ -71,23 +71,41 @@ const SYMPTOM_PHASES: PhaseType[] = [
   PhaseType.LUTEAL,
 ];
 
-function getSymptomLabel(symptom: string): string {
-  return SYMPTOM_LABELS[symptom] || symptom.replace(/_/g, ' ');
+function getSymptomLabel(symptom: string, customTypes: CustomSymptomType[]): string {
+  // Check if it's a built-in symptom
+  if (SYMPTOM_LABELS[symptom]) {
+    return SYMPTOM_LABELS[symptom];
+  }
+
+  // Check if it's a custom symptom (format: custom_${id})
+  if (symptom.startsWith('custom_')) {
+    const customId = parseInt(symptom.replace('custom_', ''), 10);
+    const customType = customTypes.find((c) => c.id === customId);
+    if (customType) {
+      return customType.name;
+    }
+  }
+
+  // Fallback: replace underscores with spaces
+  return symptom.replace(/_/g, ' ');
 }
 
 export default function InsightsView() {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [symptoms, setSymptoms] = useState<Symptom[]>([]);
+  const [customSymptomTypes, setCustomSymptomTypes] = useState<CustomSymptomType[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     try {
-      const [allCycles, allSymptoms] = await Promise.all([
+      const [allCycles, allSymptoms, allCustomTypes] = await Promise.all([
         db.getAllCycles(),
         db.getAllSymptoms(),
+        db.getAllCustomSymptomTypes(),
       ]);
       setCycles(allCycles);
       setSymptoms(allSymptoms);
+      setCustomSymptomTypes(allCustomTypes);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -233,7 +251,7 @@ export default function InsightsView() {
                         className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1"
                       >
                         <span className="text-xs text-gray-700">
-                          {getSymptomLabel(symptom)}
+                          {getSymptomLabel(symptom, customSymptomTypes)}
                         </span>
                         <span className={`text-xs font-medium ${info.color}`}>
                           {occurrences}/{cyclesAnalyzed}
