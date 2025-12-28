@@ -518,6 +518,8 @@ export default function CalendarView() {
         const newNote = await db.getNoteByDate(dateStr);
         setDayNote(newNote);
       }
+      // Reload data to update calendar icons
+      await loadData();
     } catch (error) {
       console.error('Failed to save note:', error);
     }
@@ -683,7 +685,13 @@ export default function CalendarView() {
       )}
 
       {/* Date Action Drawer */}
-      <Drawer open={isDrawerOpen} onOpenChange={setIsDrawerOpen}>
+      <Drawer open={isDrawerOpen} onOpenChange={(open) => {
+        if (!open) {
+          // Save note and refresh data when drawer closes
+          handleSaveNote();
+        }
+        setIsDrawerOpen(open);
+      }}>
         <DrawerContent className="max-h-[85vh]">
           <DrawerHeader>
             <DrawerTitle>
