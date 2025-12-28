@@ -99,10 +99,10 @@ export default function PinScreen({ isSetup }: PinScreenProps) {
     ? step === 'enter'
       ? 'Create Your PIN'
       : 'Confirm Your PIN'
-    : 'Enter PIN';
+    : 'Welcome Back';
   const subtitle = isSetup
     ? step === 'enter'
-      ? 'Choose a 4-digit PIN to protect your data'
+      ? 'Choose a 4-digit PIN to protect your data. Remember: if you forget this PIN, your data cannot be recovered.'
       : 'Re-enter your PIN to confirm'
     : 'Enter your 4-digit PIN to unlock';
 

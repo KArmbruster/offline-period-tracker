@@ -1,11 +1,14 @@
 'use client';
 
+import { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import PinScreen from '@/components/PinScreen';
+import OnboardingScreen from '@/components/OnboardingScreen';
 import MainApp from '@/components/MainApp';
 
 export default function Home() {
   const { isUnlocked, isFirstLaunch, isLoading } = useApp();
+  const [onboardingComplete, setOnboardingComplete] = useState(false);
 
   if (isLoading) {
     return (
@@ -19,6 +22,11 @@ export default function Home() {
   }
 
   if (!isUnlocked) {
+    // First-time user: show onboarding first, then PIN setup
+    if (isFirstLaunch && !onboardingComplete) {
+      return <OnboardingScreen onComplete={() => setOnboardingComplete(true)} />;
+    }
+    // After onboarding (or returning user): show PIN screen
     return <PinScreen isSetup={isFirstLaunch} />;
   }
 
