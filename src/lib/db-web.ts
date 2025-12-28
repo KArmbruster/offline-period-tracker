@@ -246,12 +246,14 @@ class WebDatabaseService {
     localStorage.removeItem(STORAGE_KEYS.SYMPTOMS);
     localStorage.removeItem(STORAGE_KEYS.CUSTOM_SYMPTOM_TYPES);
     localStorage.removeItem(STORAGE_KEYS.DAY_NOTES);
+    localStorage.removeItem(STORAGE_KEYS.INITIALIZED);
     this.nextIds = {
       cycles: 1,
       symptoms: 1,
       custom_symptom_types: 1,
       day_notes: 1,
     };
+    this.isInitialized = false;
   }
 
   async importData(data: {

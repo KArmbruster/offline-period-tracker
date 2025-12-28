@@ -99,11 +99,13 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
   const resetApp = useCallback(async () => {
     try {
-      // Clear database if connected
+      // Close database connection if open
       if (db.isReady()) {
-        await db.clearAllData();
         await db.close();
       }
+
+      // Always clear all database data (works even when not initialized)
+      await db.clearAllData();
 
       // Clear stored PIN hash
       clearAllStoredData();
@@ -114,6 +116,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.error('Reset failed:', error);
       // Force clear localStorage anyway
+      await db.clearAllData();
       clearAllStoredData();
       setIsUnlocked(false);
       setIsFirstLaunch(true);
