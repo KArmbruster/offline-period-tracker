@@ -13,11 +13,13 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
+import UserGuide from '@/components/UserGuide';
 import type { ExportData } from '@/types';
 
 export default function SettingsView() {
   const { resetApp, lock } = useApp();
   const [isChangePinOpen, setIsChangePinOpen] = useState(false);
+  const [isUserGuideOpen, setIsUserGuideOpen] = useState(false);
   const [currentPin, setCurrentPin] = useState('');
   const [newPin, setNewPin] = useState('');
   const [confirmPin, setConfirmPin] = useState('');
@@ -156,6 +158,13 @@ export default function SettingsView() {
       <h1 className="mb-6 text-2xl font-semibold text-gray-900">Settings</h1>
 
       <div className="space-y-4">
+        {/* User Guide */}
+        <SettingsButton
+          label="User Guide"
+          description="Learn how to use the app and how your data is protected"
+          onClick={() => setIsUserGuideOpen(true)}
+        />
+
         {/* Change PIN */}
         <SettingsButton
           label="Change PIN"
@@ -197,6 +206,12 @@ export default function SettingsView() {
           Your data never leaves your device.
         </p>
       </div>
+
+      {/* User Guide Drawer */}
+      <UserGuide
+        isOpen={isUserGuideOpen}
+        onClose={() => setIsUserGuideOpen(false)}
+      />
 
       {/* Change PIN Drawer */}
       <Drawer open={isChangePinOpen} onOpenChange={setIsChangePinOpen}>

@@ -9,7 +9,7 @@ interface OnboardingScreenProps {
 
 const slides = [
   {
-    title: 'Welcome',
+    title: 'Welcome to Offline Period Tracker',
     content: 'A simple, private period tracker designed with your privacy as the top priority.',
   },
   {
