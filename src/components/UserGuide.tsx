@@ -119,11 +119,11 @@ export default function UserGuide({ isOpen, onClose }: UserGuideProps) {
               Calendar Colors
             </h3>
             <div className="space-y-2 text-sm">
-              <LegendRow color="bg-phase-menstrual" label="Menstrual phase (period days)" />
-              <LegendRow color="bg-phase-follicular" label="Follicular phase (after period, before fertile window)" />
-              <LegendRow color="ring-4 ring-inset ring-phase-fertile" label="Fertile window (green ring)" />
+              <LegendRow color="bg-phase-menstrual" label="Menstrual phase" />
+              <LegendRow color="bg-phase-follicular" label="Follicular phase" />
+              <LegendRow color="ring-4 ring-inset ring-phase-fertile" label="Fertile days" />
               <LegendRow color="bg-phase-ovulation" label="Ovulation day" />
-              <LegendRow color="bg-phase-luteal" label="Luteal phase (after ovulation)" />
+              <LegendRow color="bg-phase-luteal" label="Luteal phase" />
             </div>
           </section>
 

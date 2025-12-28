@@ -53,7 +53,7 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
     <div className="flex min-h-screen flex-col items-center justify-center bg-white px-6 safe-area-top">
       <div className="w-full max-w-sm">
         {/* App Icon */}
-        <div className="mb-6 flex justify-center">
+        <div className="mb-14 flex justify-center">
           <img
             src={`${basePath}/icons/icon-192.png`}
             alt="Period Tracker"
