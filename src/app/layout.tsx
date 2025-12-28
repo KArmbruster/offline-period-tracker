@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Offline Period Tracker",
   description: "Privacy-first offline period tracking app",
-  manifest: "/manifest.json",
+  manifest: (process.env.NODE_ENV === "production" ? "/offline-period-tracker" : "") + "/manifest.json",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
