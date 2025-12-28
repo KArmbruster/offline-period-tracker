@@ -28,6 +28,7 @@ import {
   getPredictedPhaseForDate,
   getFertileWindow,
   getOvulationDate,
+  getDaysUntilNextPeriod,
 } from '@/lib/cycle-logic';
 import type { Cycle, Symptom, PhaseType, CustomSymptomType, DayNote } from '@/types';
 import { PhaseType as Phase, SymptomType } from '@/types';
@@ -195,17 +196,20 @@ export default function CalendarView() {
   // Day note state
   const [dayNote, setDayNote] = useState<DayNote | null>(null);
   const [noteText, setNoteText] = useState('');
+  const [allNotes, setAllNotes] = useState<DayNote[]>([]);
 
   const loadData = useCallback(async () => {
     try {
-      const [allCycles, allSymptoms, allCustomTypes] = await Promise.all([
+      const [allCycles, allSymptoms, allCustomTypes, notes] = await Promise.all([
         db.getAllCycles(),
         db.getAllSymptoms(),
         db.getAllCustomSymptomTypes(),
+        db.getAllNotes(),
       ]);
       setCycles(allCycles);
       setSymptoms(allSymptoms);
       setCustomSymptomTypes(allCustomTypes);
+      setAllNotes(notes);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -237,6 +241,12 @@ export default function CalendarView() {
     if (!todayPhase) return [];
     return getSymptomsForPhaseHistory(todayPhase, cycles, symptoms, cycleLength, 6);
   }, [todayPhase, cycles, symptoms, cycleLength]);
+
+  const nextPeriodInfo = useMemo(() => {
+    return getDaysUntilNextPeriod(cycles, cycleLength);
+  }, [cycles, cycleLength]);
+
+  const cyclesAnalyzed = Math.min(cycles.length, 6);
 
   const getCalendarDays = useCallback(() => {
     const monthStart = startOfMonth(currentMonth);
@@ -425,17 +435,22 @@ export default function CalendarView() {
 
   const selectedDateInfo = getSelectedDateInfo();
 
-  // Check if a day has any user entries (period start/end, ovulation, or symptoms)
-  const getDayHasEntries = useCallback(
-    (date: Date): boolean => {
+  // Check what type of entries a day has
+  const getDayEntries = useCallback(
+    (date: Date): { hasDateMarker: boolean; hasSymptoms: boolean; hasNote: boolean } => {
       const dateStr = format(date, 'yyyy-MM-dd');
       const hasPeriodStart = cycles.some((c) => c.period_start_date === dateStr);
       const hasPeriodEnd = cycles.some((c) => c.period_end_date === dateStr);
       const hasOvulation = cycles.some((c) => c.ovulation_date === dateStr);
       const hasSymptoms = symptoms.some((s) => s.date === dateStr);
-      return hasPeriodStart || hasPeriodEnd || hasOvulation || hasSymptoms;
+      const hasNote = allNotes.some((n) => n.date === dateStr);
+      return {
+        hasDateMarker: hasPeriodStart || hasPeriodEnd || hasOvulation,
+        hasSymptoms,
+        hasNote,
+      };
     },
-    [cycles, symptoms]
+    [cycles, symptoms, allNotes]
   );
 
   // Toggle a symptom for the selected date
@@ -591,7 +606,7 @@ export default function CalendarView() {
             ? getDayStyles(phase, isPrediction, isFertile)
             : 'text-gray-300';
           const todayRingColor = getTodayRingColor(phase);
-          const hasEntries = isCurrentMonth && !isFuture && getDayHasEntries(day);
+          const dayEntries = isCurrentMonth && !isFuture ? getDayEntries(day) : null;
 
           return (
             <button
@@ -611,8 +626,21 @@ export default function CalendarView() {
               ) : (
                 format(day, 'd')
               )}
-              {hasEntries && (
+              {/* Top left: Circle for date markers (start, end, ovulation) */}
+              {dayEntries?.hasDateMarker && (
+                <span className="absolute left-1 top-1">
+                  <CircleIcon />
+                </span>
+              )}
+              {/* Top right: Star for symptoms */}
+              {dayEntries?.hasSymptoms && (
                 <span className="absolute right-1 top-1">
+                  <StarIcon />
+                </span>
+              )}
+              {/* Bottom right: Pen for notes */}
+              {dayEntries?.hasNote && (
+                <span className="absolute bottom-1 right-1">
                   <PenIcon />
                 </span>
               )}
@@ -643,9 +671,15 @@ export default function CalendarView() {
         <LegendItem color="bg-phase-luteal" label="Luteal" />
       </div>
 
-      {/* Phase Symptoms - shows historical symptoms for current phase */}
+      {/* Phase Info Panel - shows current phase, next period, and common symptoms */}
       {cycles.length > 0 && (
-        <PhaseSymptoms phase={todayPhase} symptoms={phaseSymptoms} />
+        <PhaseSymptoms
+          phase={todayPhase}
+          symptoms={phaseSymptoms}
+          customSymptomTypes={customSymptomTypes}
+          cyclesAnalyzed={cyclesAnalyzed}
+          nextPeriodInfo={nextPeriodInfo}
+        />
       )}
 
       {/* Date Action Drawer */}
@@ -969,6 +1003,36 @@ function PlusIcon() {
       className="h-4 w-4"
     >
       <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
+    </svg>
+  );
+}
+
+function CircleIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      className="h-3 w-3 opacity-60"
+    >
+      <circle cx="10" cy="10" r="6" />
+    </svg>
+  );
+}
+
+function StarIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 20 20"
+      fill="currentColor"
+      className="h-3 w-3 opacity-60"
+    >
+      <path
+        fillRule="evenodd"
+        d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401Z"
+        clipRule="evenodd"
+      />
     </svg>
   );
 }

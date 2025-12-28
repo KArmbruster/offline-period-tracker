@@ -279,6 +279,37 @@ export function getNextPredictedPeriod(
 }
 
 /**
+ * Get days until next predicted period (can be negative if overdue)
+ * Returns { daysUntil, predictedDate, isOverdue }
+ */
+export function getDaysUntilNextPeriod(
+  cycles: Cycle[],
+  cycleLength: number
+): { daysUntil: number; predictedDate: string; isOverdue: boolean } | null {
+  if (cycles.length === 0) {
+    return null;
+  }
+
+  // Get most recent cycle
+  const sortedCycles = [...cycles].sort(
+    (a, b) => parseISO(b.period_start_date).getTime() - parseISO(a.period_start_date).getTime()
+  );
+
+  const lastCycle = sortedCycles[0];
+  const lastStart = parseISO(lastCycle.period_start_date);
+  const nextPeriod = addDays(lastStart, cycleLength);
+
+  const today = startOfDay(new Date());
+  const daysUntil = differenceInDays(nextPeriod, today);
+
+  return {
+    daysUntil,
+    predictedDate: format(nextPeriod, 'yyyy-MM-dd'),
+    isOverdue: daysUntil < 0,
+  };
+}
+
+/**
  * Get next predicted ovulation date
  */
 export function getNextPredictedOvulation(
