@@ -52,7 +52,6 @@ export interface Symptom {
   cycle_id: number | null;
   date: string; // ISO 8601 YYYY-MM-DD
   symptom_type: string;
-  notes: string | null;
 }
 
 export interface CustomSymptomType {
@@ -84,6 +83,7 @@ export interface ExportData {
   cycles: Cycle[];
   symptoms: Symptom[];
   custom_symptom_types: CustomSymptomType[];
+  day_notes: DayNote[];
 }
 
 // Insights

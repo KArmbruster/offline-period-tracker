@@ -4,17 +4,17 @@
 A 100% local, offline menstrual tracking application with zero data exfiltration. Built for iOS, Android (via Capacitor), and Web (PWA). Single user only.
 
 ## Tech Stack
-- **Framework**: Next.js 14+ (App Router), React, TypeScript
+- **Framework**: Next.js 16+ (App Router, static export), React, TypeScript
 - **Mobile**: Capacitor (Ionic)
 - **UI**: ShadCN UI + Tailwind CSS
-- **Database**: SQLite with SQLCipher encryption (capacitor-sqlite)
+- **Database**: SQLite with SQLCipher encryption (native) / localStorage (web)
 - **State**: React Context/Hooks
 - **Date Handling**: date-fns
 
 ## Critical Rules
 1. **NO Network Requests** - No fetch, axios, XMLHttpRequest, or 3rd party SDKs requiring internet
 2. **NO Analytics/Telemetry** - Strictly forbidden
-3. **Local Storage Only** - All data in encrypted local SQLite
+3. **Local Storage Only** - All data in encrypted local SQLite (native) or localStorage (web)
 4. **Privacy First** - No login, no accounts, PIN-derived encryption keys
 5. **Error Handling** - No stack traces in UI, console logging only
 
@@ -22,47 +22,61 @@ A 100% local, offline menstrual tracking application with zero data exfiltration
 | Color | Hex | Usage |
 |-------|-----|-------|
 | Red | `#B3014F` | Primary accent, menstrual phase |
-| Light Pink | `#FFABD4` | Secondary backgrounds |
+| Light Pink | `#ec66a7` | Secondary backgrounds |
 | White | `#FFFFFF` | Backgrounds, text |
 | Fuchsia | `#FE68A7` | Highlights, buttons |
 
 ## Calendar Phase Colors
-| Phase | Color | Style |
-|-------|-------|-------|
-| Menstrual | Red | Solid fill |
-| Follicular | Teal | Solid fill |
-| Fertile | Green | Outline only |
-| Ovulation | Green | Solid fill |
-| Luteal | Blue | Solid fill |
+| Phase | Color | Hex | Style |
+|-------|-------|-----|-------|
+| Menstrual | Red | `#B3014F` | Solid fill |
+| Follicular | Teal | `#24b2c5` | Solid fill |
+| Fertile | Green | `#22C55E` | Ring/outline only (shown on underlying phase) |
+| Ovulation | Green | `#22C55E` | Solid fill |
+| Luteal | Blue | `#3B82F6` | Solid fill |
 
 ## File Structure
 ```
 src/
 ├── app/
-│   ├── (tabs)/           # Main navigation (Calendar, Insights, Settings)
-│   └── pin/              # PIN entry/setup screens
+│   ├── globals.css          # Tailwind + custom CSS variables
+│   ├── layout.tsx           # Root layout with AppProvider
+│   ├── page.tsx             # Main entry point
+│   └── icon.svg             # App icon
 ├── components/
-│   └── ui/               # ShadCN primitives
+│   ├── ui/                  # ShadCN primitives (button, drawer, input)
+│   ├── CalendarView.tsx     # Main calendar with phase display
+│   ├── InsightsView.tsx     # Statistics and symptom history
+│   ├── SettingsView.tsx     # PIN change, export/import, reset
+│   ├── MainApp.tsx          # Tab navigation container
+│   ├── OnboardingScreen.tsx # First-launch PIN setup
+│   ├── PinScreen.tsx        # PIN entry for unlock
+│   └── PhaseSymptoms.tsx    # Today's phase symptom display
+├── context/
+│   └── AppContext.tsx       # Global app state (unlock, first launch)
 ├── lib/
-│   ├── db.ts             # SQLite connection singleton
-│   ├── cycle-logic.ts    # Pure functions for phase calculations
-│   └── crypto.ts         # PIN-based key derivation
-└── types.ts              # TypeScript interfaces and enums
+│   ├── db.ts                # Database interface + SQLite implementation
+│   ├── db-web.ts            # localStorage implementation for web/PWA
+│   ├── cycle-logic.ts       # Pure functions for phase calculations
+│   ├── crypto.ts            # PIN-based key derivation and verification
+│   └── utils.ts             # Utility functions (cn for classnames)
+└── types.ts                 # TypeScript interfaces and enums
 ```
 
 ## Security
 
 ### PIN Protection
 - **Format**: 4 digits only
-- **Encryption**: SQLCipher with key derived from PIN
+- **Encryption**: SQLCipher with key derived from PIN (native) / localStorage (web)
 - **Auto-lock**: App locks immediately when put in background
 - **No Recovery**: Forgotten PIN = data lost forever
 - **Reset Option**: User can reset app (deletes all data) to start fresh
 
 ### First Launch Flow
-1. Mandatory 4-digit PIN setup
-2. PIN confirmation
-3. Main calendar view with empty state message
+1. Onboarding screen with app introduction
+2. Mandatory 4-digit PIN setup
+3. PIN confirmation
+4. Main calendar view with empty state message
 
 ## Database Schema
 
@@ -74,13 +88,14 @@ src/
 | id | INTEGER | Primary key |
 | period_start_date | TEXT | ISO 8601 (YYYY-MM-DD) |
 | period_end_date | TEXT | ISO 8601, nullable |
+| ovulation_date | TEXT | ISO 8601, nullable (user-marked) |
 | created_at | TEXT | Timestamp |
 
 #### `symptoms`
 | Column | Type | Description |
 |--------|------|-------------|
 | id | INTEGER | Primary key |
-| cycle_id | INTEGER | Foreign key to cycles |
+| cycle_id | INTEGER | Foreign key to cycles, nullable |
 | date | TEXT | ISO 8601 |
 | symptom_type | TEXT | Symptom identifier |
 | notes | TEXT | Optional notes |
@@ -90,20 +105,23 @@ src/
 |--------|------|-------------|
 | id | INTEGER | Primary key |
 | name | TEXT | User-defined symptom name (unique) |
+| category | TEXT | 'physical' or 'mood' |
 | created_at | TEXT | Timestamp |
 
-#### `ovulation_markers`
+#### `day_notes`
 | Column | Type | Description |
 |--------|------|-------------|
 | id | INTEGER | Primary key |
-| cycle_id | INTEGER | Foreign key to cycles |
-| date | TEXT | ISO 8601 |
-| is_confirmed | INTEGER | 0 = estimated, 1 = user-marked |
+| date | TEXT | ISO 8601 (unique) |
+| content | TEXT | Free-form note text |
+| created_at | TEXT | Timestamp |
+| updated_at | TEXT | Timestamp |
 
 ### Required Indices
 - `idx_cycles_start_date` on `cycles(period_start_date)`
 - `idx_symptoms_cycle_id` on `symptoms(cycle_id)`
 - `idx_symptoms_date` on `symptoms(date)`
+- `idx_day_notes_date` on `day_notes(date)`
 
 ## Default Symptom Types
 ```typescript
@@ -116,6 +134,9 @@ enum SymptomType {
   FATIGUE = 'fatigue',
   BACKACHE = 'backache',
   NAUSEA = 'nausea',
+  ACNE = 'acne',
+  INSOMNIA = 'insomnia',
+  CRAVINGS = 'cravings',
 
   // Flow
   FLOW_LIGHT = 'flow_light',
@@ -129,11 +150,7 @@ enum SymptomType {
   MOOD_IRRITABLE = 'mood_irritable',
   MOOD_ANXIOUS = 'mood_anxious',
   MOOD_CALM = 'mood_calm',
-
-  // Other
-  ACNE = 'acne',
-  INSOMNIA = 'insomnia',
-  CRAVINGS = 'cravings',
+  MOOD_HORNY = 'mood_horny',
 }
 ```
 
@@ -146,62 +163,86 @@ enum SymptomType {
 
 ### Phase Definitions (in visual priority order)
 1. **Menstrual**: `period_start` to `period_end` (default 5 days if end unknown)
-2. **Ovulation**: User-marked date OR `CycleLength - 14 days`
-3. **Fertile Window**: `O_day - 5` to `O_day + 1`
-4. **Follicular**: End of Menstrual to Start of Fertile
-5. **Luteal**: `O_day + 2` to next `period_start`
+2. **Ovulation**: User-marked date (stored in `cycles.ovulation_date`) OR estimated as `CycleLength - 14 days`
+3. **Fertile Window**: `O_day - 4` to `O_day + 1` (displayed as green ring overlay on underlying phase)
+4. **Follicular**: End of Menstrual to day before Ovulation
+5. **Luteal**: Day after Ovulation to next `period_start`
 
 ### Standard 28-Day Cycle Example
 | Days | Phase | Calendar Color |
 |------|-------|----------------|
 | 1-5 | Menstruation | Red (solid) |
-| 6-8 | Follicular | Teal (solid) |
-| 9-13 | Fertile | Green (outline) |
+| 6-9 | Follicular | Teal (solid) |
+| 10-14 | Follicular + Fertile | Teal (solid) + Green ring |
 | 14 | Ovulation | Green (solid) |
-| 15 | Fertile | Green (outline) |
+| 15 | Luteal + Fertile | Blue (solid) + Green ring |
 | 16-28 | Luteal | Blue (solid) |
 
 ### Conflict Resolution
-If "Fertile" overlaps with "Menstrual" (short cycles), **Menstrual wins** visually.
+- If "Fertile" overlaps with "Menstrual" (short cycles), **Menstrual wins** visually
+- Fertile window is shown as a ring/outline overlay, not a separate background color
+- The day after ovulation shows as Luteal (blue) but still has the fertile ring
 
 ## Predictions
 - Project 12 months into the future
 - Formula: `LastPeriodStart + (n × AverageCycleLength)`
+- Predictions shown with reduced opacity (70%)
 
 ## Calendar View
 
 ### Layout
-- Month name displayed at top
+- Month name displayed at top with navigation arrows
 - Monday as first day of week
-- Day number in each box
-- Box background color indicates phase
+- Day number in each cell
+- Cell background color indicates phase
+- Today highlighted with a ring in phase-contrasting color
+- Pen icon on days with user entries (period start/end, ovulation, symptoms)
 
-### Interaction
-- Tap any date to open bottom sheet
-- Bottom sheet shows two buttons:
-  - "Start of Period"
-  - "End of Period"
-- Can also log symptoms for that date
+### Day Drawer
+Tap any non-future date to open bottom drawer with:
+- **Day Type Selection** (radio buttons):
+  - None
+  - Period Start
+  - Period End (only if within a cycle)
+  - Ovulation (only if within a cycle)
+- **Symptoms** (toggleable buttons):
+  - Physical symptoms (including custom)
+  - Flow indicators
+  - Mood symptoms (including custom)
+  - "Add custom symptom" option
+- **Notes**: Free-form text area for day notes
 
 ### Empty State
 When no data exists, show message:
 > "Start tracking your periods as they come, or fill in historic data from the last 6 months."
 
+### Phase Legend
+Displayed below calendar showing all phase colors
+
+### Phase Symptoms
+Shows historical symptoms for today's current phase from last 6 cycles
+
 ## Insights View
 
-### Statistics Displayed (simple numbers, no charts)
-- Average cycle length (days)
-- Cycle length variation (shortest/longest)
-- Average period duration (days)
-- Most common symptoms
-- Next predicted period date
-- Next predicted ovulation date
+### Statistics Displayed
+Based on last 6 cycles:
+- **Cycle Length**: Average, Shortest, Longest (days)
+- **Period Duration**: Average, Shortest, Longest (days)
+- **Days Until Ovulation**: Average, Shortest, Longest (days)
+- **History**: Total periods tracked
+
+### Common Symptoms by Phase
+For each phase (Menstrual, Follicular, Ovulation, Luteal):
+- Shows ALL symptoms recorded during that phase
+- Displays occurrence count as "X/6" (X out of last 6 cycles)
+- Most common symptoms displayed first
+- Empty state message if no symptoms recorded
 
 ## Settings View
 
 ### Options
 - Change PIN
-- Export Data (JSON, encrypted with app PIN)
+- Export Data (JSON backup file)
 - Import Data (destructive restore)
 - Reset App (delete all data)
 
@@ -215,36 +256,37 @@ When no data exists, show message:
   "cycles": [...],
   "symptoms": [...],
   "custom_symptom_types": [...],
-  "ovulation_markers": [...]
+  "day_notes": [...]
 }
 ```
 
 ### Export Flow
 1. User taps "Export Data"
-2. Data encrypted with app PIN using SQLCipher-compatible method
-3. Save to device filesystem via native sharing
+2. JSON file generated with timestamp in filename
+3. Download triggered via browser
 
 ### Import Flow
 1. User taps "Import Data"
 2. Warning: "This will delete all existing data"
 3. User confirms
-4. Select file
-5. Decrypt with current PIN
+4. Select JSON file
+5. Validate version
 6. Wipe database
 7. Restore from JSON
 
 ## UI Guidelines
-- **Mobile First**: Touch targets ≥ 44px (`h-12` or `h-14`)
+- **Mobile First**: Touch targets >= 44px (`h-12` or `h-14`)
 - **Bottom Sheets**: Use Drawers instead of centered Modals for data entry
-- **Font Size**: ≥ 16px for inputs (prevents iOS auto-zoom)
+- **Font Size**: >= 16px for inputs (prevents iOS auto-zoom)
 - **Theme**: Single color theme (Red/Pink/White/Fuchsia), calm aesthetic
 - **Language**: English only
 - **Notifications**: None
+- **No Emojis**: Unless explicitly requested by user
 
 ## Development Commands
 ```bash
 npm run dev              # Start development server
-npm run build            # Build web assets
+npm run build            # Build web assets (static export)
 npx cap sync             # Copy build to native platforms
 npx cap open ios         # Open Xcode
 npx cap open android     # Open Android Studio
@@ -253,19 +295,29 @@ npx cap run android      # Run on Android device/emulator
 
 ## Adding a New Symptom Type
 1. Add to `SymptomType` enum in `types.ts`
-2. Update SQLite migration in `lib/db.ts` if needed
-3. Add icon/label mapping in `components/SymptomPicker.tsx`
+2. Add label mapping in `CalendarView.tsx` `SYMPTOM_CATEGORIES`
+3. Add label mapping in `InsightsView.tsx` `SYMPTOM_LABELS`
+
+## Adding a Custom Symptom (User Flow)
+1. Open day drawer
+2. Click "Add custom symptom"
+3. Select category (Physical or Mood)
+4. Enter symptom name
+5. Symptom appears in appropriate section
 
 ## Current Status
-- [ ] Project setup and scaffolding
-- [ ] Database layer with SQLCipher
-- [ ] PIN setup and lock screen
-- [ ] Core cycle logic
-- [ ] Calendar view with phase colors
-- [ ] Period start/end logging
-- [ ] Symptom tracking (default + custom)
-- [ ] Insights view
-- [ ] Settings page
-- [ ] Data export/import
-- [ ] PWA configuration
-- [ ] Capacitor mobile builds
+- [x] Project setup and scaffolding
+- [x] Database layer (SQLite native + localStorage web)
+- [x] PIN setup and lock screen
+- [x] Core cycle logic with phase calculations
+- [x] Calendar view with phase colors
+- [x] Period start/end/ovulation logging
+- [x] Symptom tracking (default + custom)
+- [x] Day notes
+- [x] Insights view with statistics
+- [x] Common symptoms by phase
+- [x] Phase symptoms display
+- [x] Settings page
+- [x] Data export/import
+- [x] PWA configuration
+- [ ] Capacitor mobile builds (not yet tested)

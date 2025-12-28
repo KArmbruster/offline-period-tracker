@@ -23,12 +23,13 @@ export interface DatabaseInterface {
   getSymptomsByDate(date: string): Promise<Symptom[]>;
   getSymptomsByCycleId(cycleId: number): Promise<Symptom[]>;
   getAllSymptoms(): Promise<Symptom[]>;
-  addSymptom(date: string, symptomType: string, cycleId?: number, notes?: string): Promise<number>;
+  addSymptom(date: string, symptomType: string, cycleId?: number): Promise<number>;
   deleteSymptom(id: number): Promise<void>;
   getAllCustomSymptomTypes(): Promise<CustomSymptomType[]>;
   addCustomSymptomType(name: string, category: 'physical' | 'mood'): Promise<number>;
   deleteCustomSymptomType(id: number): Promise<void>;
   getNoteByDate(date: string): Promise<DayNote | null>;
+  getAllNotes(): Promise<DayNote[]>;
   addNote(date: string, content: string): Promise<number>;
   updateNote(id: number, content: string): Promise<void>;
   deleteNote(id: number): Promise<void>;
@@ -36,12 +37,14 @@ export interface DatabaseInterface {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
+    day_notes: DayNote[];
   }>;
   clearAllData(): Promise<void>;
   importData(data: {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
+    day_notes?: DayNote[];
   }): Promise<void>;
   isReady(): boolean;
 }
@@ -241,11 +244,11 @@ class NativeDatabaseService implements DatabaseInterface {
     return (result.values || []) as Symptom[];
   }
 
-  async addSymptom(date: string, symptomType: string, cycleId?: number, notes?: string): Promise<number> {
+  async addSymptom(date: string, symptomType: string, cycleId?: number): Promise<number> {
     const db = this.getDb();
     const result = await db.run(
-      'INSERT INTO symptoms (date, symptom_type, cycle_id, notes) VALUES (?, ?, ?, ?)',
-      [date, symptomType, cycleId || null, notes || null]
+      'INSERT INTO symptoms (date, symptom_type, cycle_id) VALUES (?, ?, ?)',
+      [date, symptomType, cycleId || null]
     );
     return result.changes?.lastId || 0;
   }
@@ -283,6 +286,12 @@ class NativeDatabaseService implements DatabaseInterface {
     return (result.values?.[0] as DayNote) || null;
   }
 
+  async getAllNotes(): Promise<DayNote[]> {
+    const db = this.getDb();
+    const result = await db.query('SELECT * FROM day_notes ORDER BY date DESC');
+    return (result.values || []) as DayNote[];
+  }
+
   async addNote(date: string, content: string): Promise<number> {
     const db = this.getDb();
     const result = await db.run(
@@ -310,18 +319,21 @@ class NativeDatabaseService implements DatabaseInterface {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
+    day_notes: DayNote[];
   }> {
     const cycles = await this.getAllCycles();
     const symptoms = await this.getAllSymptoms();
     const custom_symptom_types = await this.getAllCustomSymptomTypes();
+    const day_notes = await this.getAllNotes();
 
-    return { cycles, symptoms, custom_symptom_types };
+    return { cycles, symptoms, custom_symptom_types, day_notes };
   }
 
   async clearAllData(): Promise<void> {
     const db = this.getDb();
     await db.execute('DELETE FROM symptoms');
     await db.execute('DELETE FROM custom_symptom_types');
+    await db.execute('DELETE FROM day_notes');
     await db.execute('DELETE FROM cycles');
   }
 
@@ -329,6 +341,7 @@ class NativeDatabaseService implements DatabaseInterface {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
+    day_notes?: DayNote[];
   }): Promise<void> {
     const db = this.getDb();
 
@@ -346,16 +359,24 @@ class NativeDatabaseService implements DatabaseInterface {
     // Import symptoms
     for (const symptom of data.symptoms) {
       await db.run(
-        'INSERT INTO symptoms (id, cycle_id, date, symptom_type, notes) VALUES (?, ?, ?, ?, ?)',
-        [symptom.id, symptom.cycle_id, symptom.date, symptom.symptom_type, symptom.notes]
+        'INSERT INTO symptoms (id, cycle_id, date, symptom_type) VALUES (?, ?, ?, ?)',
+        [symptom.id, symptom.cycle_id, symptom.date, symptom.symptom_type]
       );
     }
 
     // Import custom symptom types
     for (const customType of data.custom_symptom_types) {
       await db.run(
-        'INSERT INTO custom_symptom_types (id, name, created_at) VALUES (?, ?, ?)',
-        [customType.id, customType.name, customType.created_at]
+        'INSERT INTO custom_symptom_types (id, name, category, created_at) VALUES (?, ?, ?, ?)',
+        [customType.id, customType.name, customType.category, customType.created_at]
+      );
+    }
+
+    // Import day notes
+    for (const note of data.day_notes || []) {
+      await db.run(
+        'INSERT INTO day_notes (id, date, content, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
+        [note.id, note.date, note.content, note.created_at, note.updated_at]
       );
     }
   }

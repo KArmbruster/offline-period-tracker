@@ -39,7 +39,7 @@ export default function SettingsView() {
 
       const a = document.createElement('a');
       a.href = url;
-      a.download = `period-tracker-backup-${format(new Date(), 'yyyy-MM-dd')}.json`;
+      a.download = `period-tracker-backup-${format(new Date(), 'yyyy-MM-dd-HHmmss')}.json`;
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
@@ -78,6 +78,7 @@ export default function SettingsView() {
           cycles: data.cycles,
           symptoms: data.symptoms,
           custom_symptom_types: data.custom_symptom_types,
+          day_notes: data.day_notes || [],
         });
 
         alert('Data imported successfully!');

@@ -137,7 +137,7 @@ class WebDatabaseService {
     );
   }
 
-  async addSymptom(date: string, symptomType: string, cycleId?: number, notes?: string): Promise<number> {
+  async addSymptom(date: string, symptomType: string, cycleId?: number): Promise<number> {
     const symptoms = this.getStoredData<Symptom>(STORAGE_KEYS.SYMPTOMS);
     const id = this.nextIds.symptoms++;
     const newSymptom: Symptom = {
@@ -145,7 +145,6 @@ class WebDatabaseService {
       cycle_id: cycleId || null,
       date,
       symptom_type: symptomType,
-      notes: notes || null,
     };
     symptoms.push(newSymptom);
     this.setStoredData(STORAGE_KEYS.SYMPTOMS, symptoms);
@@ -194,6 +193,11 @@ class WebDatabaseService {
     return notes.find(n => n.date === date) || null;
   }
 
+  async getAllNotes(): Promise<DayNote[]> {
+    const notes = this.getStoredData<DayNote>(STORAGE_KEYS.DAY_NOTES);
+    return notes.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }
+
   async addNote(date: string, content: string): Promise<number> {
     const notes = this.getStoredData<DayNote>(STORAGE_KEYS.DAY_NOTES);
     const id = this.nextIds.day_notes++;
@@ -233,11 +237,13 @@ class WebDatabaseService {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
+    day_notes: DayNote[];
   }> {
     return {
       cycles: await this.getAllCycles(),
       symptoms: await this.getAllSymptoms(),
       custom_symptom_types: await this.getAllCustomSymptomTypes(),
+      day_notes: this.getStoredData<DayNote>(STORAGE_KEYS.DAY_NOTES),
     };
   }
 
@@ -260,12 +266,14 @@ class WebDatabaseService {
     cycles: Cycle[];
     symptoms: Symptom[];
     custom_symptom_types: CustomSymptomType[];
+    day_notes?: DayNote[];
   }): Promise<void> {
     await this.clearAllData();
 
     this.setStoredData(STORAGE_KEYS.CYCLES, data.cycles);
     this.setStoredData(STORAGE_KEYS.SYMPTOMS, data.symptoms);
     this.setStoredData(STORAGE_KEYS.CUSTOM_SYMPTOM_TYPES, data.custom_symptom_types);
+    this.setStoredData(STORAGE_KEYS.DAY_NOTES, data.day_notes || []);
 
     this.loadNextIds();
   }
