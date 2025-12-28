@@ -29,10 +29,12 @@ export interface DatabaseInterface {
   addCustomSymptomType(name: string): Promise<number>;
   deleteCustomSymptomType(id: number): Promise<void>;
   getOvulationMarkerByCycleId(cycleId: number): Promise<OvulationMarker | null>;
+  getOvulationMarkerByDate(date: string): Promise<OvulationMarker | null>;
   getAllOvulationMarkers(): Promise<OvulationMarker[]>;
   addOvulationMarker(cycleId: number, date: string, isConfirmed: boolean): Promise<number>;
   updateOvulationMarker(id: number, date: string, isConfirmed: boolean): Promise<void>;
   deleteOvulationMarker(id: number): Promise<void>;
+  deleteOvulationMarkerByDate(date: string): Promise<void>;
   exportAllData(): Promise<{
     cycles: Cycle[];
     symptoms: Symptom[];
@@ -310,6 +312,17 @@ class NativeDatabaseService implements DatabaseInterface {
   async deleteOvulationMarker(id: number): Promise<void> {
     const db = this.getDb();
     await db.run('DELETE FROM ovulation_markers WHERE id = ?', [id]);
+  }
+
+  async getOvulationMarkerByDate(date: string): Promise<OvulationMarker | null> {
+    const db = this.getDb();
+    const result = await db.query('SELECT * FROM ovulation_markers WHERE date = ?', [date]);
+    return (result.values?.[0] as OvulationMarker) || null;
+  }
+
+  async deleteOvulationMarkerByDate(date: string): Promise<void> {
+    const db = this.getDb();
+    await db.run('DELETE FROM ovulation_markers WHERE date = ?', [date]);
   }
 
   // Export/Import

@@ -13,6 +13,10 @@ import {
   startOfWeek,
   endOfWeek,
   parseISO,
+  isAfter,
+  startOfDay,
+  isWithinInterval,
+  addDays,
 } from 'date-fns';
 import { db } from '@/lib/db';
 import {
@@ -22,8 +26,10 @@ import {
   findCycleForDate,
   getSymptomsForPhaseHistory,
   getPredictedPhaseForDate,
+  getFertileWindow,
+  getOvulationDate,
 } from '@/lib/cycle-logic';
-import type { Cycle, Symptom, PhaseType } from '@/types';
+import type { Cycle, Symptom, PhaseType, OvulationMarker } from '@/types';
 import { PhaseType as Phase, SymptomType } from '@/types';
 import {
   Drawer,
@@ -31,7 +37,6 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/components/ui/drawer';
-import { Button } from '@/components/ui/button';
 import PhaseSymptoms from '@/components/PhaseSymptoms';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -70,39 +75,105 @@ const SYMPTOM_CATEGORIES = {
       { type: SymptomType.MOOD_IRRITABLE, label: 'Irritable' },
       { type: SymptomType.MOOD_ANXIOUS, label: 'Anxious' },
       { type: SymptomType.MOOD_CALM, label: 'Calm' },
+      { type: SymptomType.MOOD_HORNY, label: 'Horny' },
     ],
   },
 };
+
+// Day type for radio button selection
+type DayType = 'none' | 'period_start' | 'period_end' | 'ovulation';
+
+// Helper function to check if a date is in the fertile window
+function isInFertileWindow(
+  date: Date,
+  cycles: Cycle[],
+  cycleLength: number,
+  ovulationMarkers: OvulationMarker[]
+): boolean {
+  const cycle = findCycleForDate(date, cycles);
+  if (!cycle) return false;
+
+  // Check if there's a confirmed ovulation marker for this cycle
+  const marker = ovulationMarkers.find((m) => m.cycle_id === cycle.id);
+  const ovulationDate = getOvulationDate(
+    cycle.period_start_date,
+    cycleLength,
+    marker
+  );
+  const fertileWindow = getFertileWindow(ovulationDate);
+
+  return isWithinInterval(date, {
+    start: startOfDay(fertileWindow.start),
+    end: startOfDay(fertileWindow.end),
+  });
+}
 
 // Helper function to get phase for a specific date
 function getDayPhaseForDate(
   date: Date,
   cycles: Cycle[],
   cycleLength: number,
+  ovulationMarkers: OvulationMarker[],
   averagePeriodLength: number = 5
 ): { phase: PhaseType | null; isPrediction: boolean } {
+  if (cycles.length === 0) {
+    return { phase: null, isPrediction: false };
+  }
+
+  // Check if this date is in the future (after today)
+  const today = startOfDay(new Date());
+  const isFutureDate = isAfter(startOfDay(date), today);
+
+  // Sort cycles by date ascending
+  const sortedCycles = [...cycles].sort(
+    (a, b) =>
+      parseISO(a.period_start_date).getTime() -
+      parseISO(b.period_start_date).getTime()
+  );
+
+  // Get the most recent cycle
+  const mostRecentCycle = sortedCycles[sortedCycles.length - 1];
+  const mostRecentStart = parseISO(mostRecentCycle.period_start_date);
+
+  // Calculate when we should start showing predictions
+  // This is after one cycle length from the most recent period start
+  const predictionCutoff = addDays(mostRecentStart, cycleLength);
+
+  // If date is beyond the prediction cutoff, use predictions (for up to 12 months)
+  if (date >= predictionCutoff && cycles.length >= 2) {
+    const predictedPhase = getPredictedPhaseForDate(
+      date,
+      cycles,
+      cycleLength,
+      averagePeriodLength
+    );
+    // Only mark as prediction (transparent) if it's a future date
+    return { phase: predictedPhase, isPrediction: isFutureDate };
+  }
+
+  // Find which cycle this date belongs to
   const cycle = findCycleForDate(date, cycles);
 
   if (cycle) {
     // Date belongs to a recorded cycle
-    const sortedCycles = [...cycles].sort(
-      (a, b) =>
-        parseISO(a.period_start_date).getTime() -
-        parseISO(b.period_start_date).getTime()
-    );
     const cycleIndex = sortedCycles.findIndex((c) => c.id === cycle.id);
     const nextCycle = sortedCycles[cycleIndex + 1];
     const nextCycleStart = nextCycle
       ? parseISO(nextCycle.period_start_date)
       : null;
 
+    // Find ovulation marker for this cycle
+    const ovulationMarker = ovulationMarkers.find((m) => m.cycle_id === cycle.id);
+
+    const phase = getPhaseForDate(date, cycle, nextCycleStart, cycleLength, ovulationMarker);
+    // Mark as prediction (transparent) only if it's a future date
     return {
-      phase: getPhaseForDate(date, cycle, nextCycleStart, cycleLength),
-      isPrediction: false,
+      phase,
+      isPrediction: isFutureDate,
     };
   }
 
-  // No recorded cycle - use prediction for future dates
+  // No recorded cycle - use prediction for dates before first cycle or gaps
   if (cycles.length >= 2) {
     const predictedPhase = getPredictedPhaseForDate(
       date,
@@ -110,7 +181,8 @@ function getDayPhaseForDate(
       cycleLength,
       averagePeriodLength
     );
-    return { phase: predictedPhase, isPrediction: true };
+    // Only mark as prediction (transparent) if it's a future date
+    return { phase: predictedPhase, isPrediction: isFutureDate };
   }
 
   return { phase: null, isPrediction: false };
@@ -120,18 +192,21 @@ export default function CalendarView() {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [symptoms, setSymptoms] = useState<Symptom[]>([]);
+  const [ovulationMarkers, setOvulationMarkers] = useState<OvulationMarker[]>([]);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
   const loadData = useCallback(async () => {
     try {
-      const [allCycles, allSymptoms] = await Promise.all([
+      const [allCycles, allSymptoms, allMarkers] = await Promise.all([
         db.getAllCycles(),
         db.getAllSymptoms(),
+        db.getAllOvulationMarkers(),
       ]);
       setCycles(allCycles);
       setSymptoms(allSymptoms);
+      setOvulationMarkers(allMarkers);
     } catch (error) {
       console.error('Failed to load data:', error);
     } finally {
@@ -146,12 +221,18 @@ export default function CalendarView() {
   const cycleLength = calculateAverageCycleLength(cycles);
   const periodLength = calculateAveragePeriodDuration(cycles) || 5;
 
+  // Check if a date is in the future (after today)
+  const isFutureDate = useCallback((date: Date): boolean => {
+    const today = startOfDay(new Date());
+    return isAfter(startOfDay(date), today);
+  }, []);
+
   // Get today's phase and historical symptoms for that phase
   const todayPhase = useMemo(() => {
     const today = new Date();
-    const result = getDayPhaseForDate(today, cycles, cycleLength, periodLength);
+    const result = getDayPhaseForDate(today, cycles, cycleLength, ovulationMarkers, periodLength);
     return result.phase;
-  }, [cycles, cycleLength, periodLength]);
+  }, [cycles, cycleLength, ovulationMarkers, periodLength]);
 
   const phaseSymptoms = useMemo(() => {
     if (!todayPhase) return [];
@@ -169,45 +250,60 @@ export default function CalendarView() {
   }, [currentMonth]);
 
   const getDayPhaseInfo = useCallback(
-    (date: Date): { phase: PhaseType | null; isPrediction: boolean } => {
-      return getDayPhaseForDate(date, cycles, cycleLength, periodLength);
+    (date: Date): { phase: PhaseType | null; isPrediction: boolean; isFertile: boolean } => {
+      const { phase, isPrediction } = getDayPhaseForDate(date, cycles, cycleLength, ovulationMarkers, periodLength);
+
+      // For recorded cycles, use actual fertile window calculation
+      // For predictions, derive fertile from the phase
+      let isFertile = false;
+
+      if (!isPrediction) {
+        // Use actual cycle data for past/present days
+        isFertile = isInFertileWindow(date, cycles, cycleLength, ovulationMarkers);
+      } else {
+        // For predicted days, derive from phase
+        isFertile = phase === Phase.FERTILE;
+      }
+
+      return { phase, isPrediction, isFertile };
     },
-    [cycles, cycleLength, periodLength]
+    [cycles, cycleLength, periodLength, ovulationMarkers]
   );
 
-  const getPhaseColor = (phase: PhaseType | null, isPrediction: boolean): string => {
-    if (isPrediction) {
-      // Lighter/muted colors for predictions
-      switch (phase) {
-        case Phase.MENSTRUAL:
-          return 'bg-phase-menstrual/50 text-white';
-        case Phase.FOLLICULAR:
-          return 'bg-phase-follicular/50 text-white';
-        case Phase.OVULATION:
-          return 'bg-phase-ovulation/50 text-white';
-        case Phase.FERTILE:
-          return 'border-2 border-phase-fertile/50 bg-white text-gray-500';
-        case Phase.LUTEAL:
-          return 'bg-phase-luteal/50 text-white';
-        default:
-          return 'bg-white text-gray-900';
-      }
-    }
-
+  // Get the background color for a phase (used for fertile days too)
+  const getPhaseBackgroundColor = (phase: PhaseType | null, isPrediction: boolean): string => {
+    // For predictions, we'll add opacity-70 separately
     switch (phase) {
       case Phase.MENSTRUAL:
-        return 'bg-phase-menstrual text-white';
+        return isPrediction ? 'bg-phase-menstrual opacity-70' : 'bg-phase-menstrual';
       case Phase.FOLLICULAR:
-        return 'bg-phase-follicular text-white';
+        return isPrediction ? 'bg-phase-follicular opacity-70' : 'bg-phase-follicular';
       case Phase.OVULATION:
-        return 'bg-phase-ovulation text-white';
-      case Phase.FERTILE:
-        return 'border-2 border-phase-fertile bg-white text-gray-900';
+        return isPrediction ? 'bg-phase-ovulation opacity-70' : 'bg-phase-ovulation';
       case Phase.LUTEAL:
-        return 'bg-phase-luteal text-white';
+        return isPrediction ? 'bg-phase-luteal opacity-70' : 'bg-phase-luteal';
+      case Phase.FERTILE:
+        return isPrediction ? 'bg-phase-follicular opacity-70' : 'bg-phase-follicular';
       default:
-        return 'bg-white text-gray-900';
+        return 'bg-white';
     }
+  };
+
+  // Get the full styling for a calendar day
+  const getDayStyles = (
+    phase: PhaseType | null,
+    isPrediction: boolean,
+    isFertile: boolean
+  ): string => {
+    const bgColor = getPhaseBackgroundColor(phase, isPrediction);
+    const textColor = phase && phase !== Phase.FERTILE ? 'text-white' : 'text-gray-900';
+
+    // Fertile days get a thick green border
+    if (isFertile || phase === Phase.FERTILE) {
+      return `${bgColor} ${textColor} ring-6 ring-inset ring-phase-fertile`;
+    }
+
+    return `${bgColor} ${textColor}`;
   };
 
   const getTodayRingColor = (phase: PhaseType | null): string => {
@@ -228,116 +324,110 @@ export default function CalendarView() {
   };
 
   const handleDayClick = (date: Date) => {
+    // Don't open drawer for future dates
+    if (isFutureDate(date)) return;
+
     setSelectedDate(date);
     setIsDrawerOpen(true);
   };
 
-  const handleMarkPeriodStart = async () => {
+  // Get the current day type (none, period_start, period_end, ovulation)
+  const getSelectedDayType = useCallback((): DayType => {
+    if (!selectedDate) return 'none';
+
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+
+    if (cycles.some((c) => c.period_start_date === dateStr)) {
+      return 'period_start';
+    }
+    if (cycles.some((c) => c.period_end_date === dateStr)) {
+      return 'period_end';
+    }
+    if (ovulationMarkers.some((m) => m.date === dateStr)) {
+      return 'ovulation';
+    }
+    return 'none';
+  }, [selectedDate, cycles, ovulationMarkers]);
+
+  const selectedDayType = getSelectedDayType();
+
+  // Handle day type change (radio button behavior)
+  const handleDayTypeChange = async (newType: DayType) => {
     if (!selectedDate) return;
 
+    const dateStr = format(selectedDate, 'yyyy-MM-dd');
+    const currentType = selectedDayType;
+
     try {
-      const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      await db.addCycle(dateStr);
+      // First, remove any existing markers for this date
+      if (currentType === 'period_start') {
+        const cycle = cycles.find((c) => c.period_start_date === dateStr);
+        if (cycle) await db.deleteCycle(cycle.id);
+      } else if (currentType === 'period_end') {
+        const cycle = cycles.find((c) => c.period_end_date === dateStr);
+        if (cycle) await db.updateCycle(cycle.id, cycle.period_start_date, undefined);
+      } else if (currentType === 'ovulation') {
+        await db.deleteOvulationMarkerByDate(dateStr);
+      }
+
+      // Then, add the new marker if not 'none'
+      if (newType === 'period_start') {
+        await db.addCycle(dateStr);
+      } else if (newType === 'period_end') {
+        // Find the cycle this date belongs to
+        const cycle = findCycleForDate(selectedDate, cycles);
+        if (cycle) {
+          await db.updateCycle(cycle.id, cycle.period_start_date, dateStr);
+        }
+      } else if (newType === 'ovulation') {
+        // Find the cycle this date belongs to
+        const cycle = findCycleForDate(selectedDate, cycles);
+        if (cycle) {
+          // Delete existing ovulation marker for this cycle if any (replace behavior)
+          const existingMarker = ovulationMarkers.find((m) => m.cycle_id === cycle.id);
+          if (existingMarker) {
+            await db.deleteOvulationMarker(existingMarker.id);
+          }
+          await db.addOvulationMarker(cycle.id, dateStr, true);
+        }
+      }
+
       await loadData();
-      setIsDrawerOpen(false);
     } catch (error) {
-      console.error('Failed to mark period start:', error);
-    }
-  };
-
-  const handleMarkPeriodEnd = async () => {
-    if (!selectedDate) return;
-
-    try {
-      const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      // Find the most recent cycle that doesn't have an end date
-      const sortedCycles = [...cycles].sort(
-        (a, b) =>
-          parseISO(b.period_start_date).getTime() -
-          parseISO(a.period_start_date).getTime()
-      );
-      const openCycle = sortedCycles.find((c) => !c.period_end_date);
-
-      if (openCycle) {
-        await db.updateCycle(openCycle.id, openCycle.period_start_date, dateStr);
-        await loadData();
-      }
-      setIsDrawerOpen(false);
-    } catch (error) {
-      console.error('Failed to mark period end:', error);
-    }
-  };
-
-  const handleRemovePeriodStart = async () => {
-    if (!selectedDate) return;
-
-    try {
-      const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      const cycleToRemove = cycles.find((c) => c.period_start_date === dateStr);
-
-      if (cycleToRemove) {
-        await db.deleteCycle(cycleToRemove.id);
-        await loadData();
-      }
-      setIsDrawerOpen(false);
-    } catch (error) {
-      console.error('Failed to remove period start:', error);
-    }
-  };
-
-  const handleRemovePeriodEnd = async () => {
-    if (!selectedDate) return;
-
-    try {
-      const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      const cycleToUpdate = cycles.find((c) => c.period_end_date === dateStr);
-
-      if (cycleToUpdate) {
-        // Remove the end date by setting it to undefined
-        await db.updateCycle(cycleToUpdate.id, cycleToUpdate.period_start_date, undefined);
-        await loadData();
-      }
-      setIsDrawerOpen(false);
-    } catch (error) {
-      console.error('Failed to remove period end:', error);
+      console.error('Failed to update day type:', error);
     }
   };
 
   // Check if selected date is a period start or end
   const getSelectedDateInfo = useCallback(() => {
-    if (!selectedDate) return { isPeriodStart: false, isPeriodEnd: false, symptoms: [] as Symptom[] };
+    if (!selectedDate) return { symptoms: [] as Symptom[] };
 
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
-    const cycleWithStart = cycles.find((c) => c.period_start_date === dateStr);
-    const cycleWithEnd = cycles.find((c) => c.period_end_date === dateStr);
     const dateSymptoms = symptoms.filter((s) => s.date === dateStr);
 
     return {
-      isPeriodStart: !!cycleWithStart,
-      isPeriodEnd: !!cycleWithEnd,
-      cycleWithStart,
-      cycleWithEnd,
       symptoms: dateSymptoms,
     };
-  }, [selectedDate, cycles, symptoms]);
+  }, [selectedDate, symptoms]);
 
   const selectedDateInfo = getSelectedDateInfo();
 
-  // Check if a day has any user entries (period start/end or symptoms)
+  // Check if a day has any user entries (period start/end, ovulation, or symptoms)
   const getDayHasEntries = useCallback(
     (date: Date): boolean => {
       const dateStr = format(date, 'yyyy-MM-dd');
       const hasPeriodStart = cycles.some((c) => c.period_start_date === dateStr);
       const hasPeriodEnd = cycles.some((c) => c.period_end_date === dateStr);
+      const hasOvulation = ovulationMarkers.some((m) => m.date === dateStr);
       const hasSymptoms = symptoms.some((s) => s.date === dateStr);
-      return hasPeriodStart || hasPeriodEnd || hasSymptoms;
+      return hasPeriodStart || hasPeriodEnd || hasOvulation || hasSymptoms;
     },
-    [cycles, symptoms]
+    [cycles, symptoms, ovulationMarkers]
   );
 
   // Toggle a symptom for the selected date
   const handleToggleSymptom = async (symptomType: string) => {
-    if (!selectedDate) return;
+    if (!selectedDate || isFutureDate(selectedDate)) return;
 
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -362,6 +452,25 @@ export default function CalendarView() {
   const isSymptomSelected = (symptomType: string): boolean => {
     return selectedDateInfo.symptoms.some((s) => s.symptom_type === symptomType);
   };
+
+  // Check if period end button should be enabled
+  const canSetPeriodEnd = useCallback((): boolean => {
+    if (!selectedDate) return false;
+
+    // Find the cycle this date belongs to
+    const cycle = findCycleForDate(selectedDate, cycles);
+    if (!cycle) return false;
+
+    // Can set period end if the selected date is on or after the cycle start
+    const cycleStart = parseISO(cycle.period_start_date);
+    return selectedDate >= cycleStart;
+  }, [selectedDate, cycles]);
+
+  // Check if ovulation can be set (must be within a cycle)
+  const canSetOvulation = useCallback((): boolean => {
+    if (!selectedDate) return false;
+    return findCycleForDate(selectedDate, cycles) !== null;
+  }, [selectedDate, cycles]);
 
   const calendarDays = getCalendarDays();
 
@@ -411,24 +520,28 @@ export default function CalendarView() {
         {calendarDays.map((day) => {
           const isCurrentMonth = isSameMonth(day, currentMonth);
           const isToday = isSameDay(day, new Date());
-          const { phase, isPrediction } = isCurrentMonth
+          const isFuture = isFutureDate(day);
+          const { phase, isPrediction, isFertile } = isCurrentMonth
             ? getDayPhaseInfo(day)
-            : { phase: null, isPrediction: false };
-          const phaseColor = getPhaseColor(phase, isPrediction);
+            : { phase: null, isPrediction: false, isFertile: false };
+          const dayStyles = isCurrentMonth
+            ? getDayStyles(phase, isPrediction, isFertile)
+            : 'text-gray-300';
           const todayRingColor = getTodayRingColor(phase);
-          const hasEntries = isCurrentMonth && getDayHasEntries(day);
+          const hasEntries = isCurrentMonth && !isFuture && getDayHasEntries(day);
 
           return (
             <button
               key={day.toISOString()}
               onClick={() => handleDayClick(day)}
-              className={`relative flex h-12 items-center justify-center rounded-lg text-sm font-medium transition-colors ${
-                isCurrentMonth ? phaseColor : 'text-gray-300'
+              disabled={isFuture}
+              className={`relative flex h-12 items-center justify-center rounded-lg text-sm font-medium transition-colors ${dayStyles} ${
+                isFuture && isCurrentMonth ? 'cursor-not-allowed opacity-50' : ''
               }`}
             >
               {isToday ? (
                 <span
-                  className={`flex h-8 w-8 items-center justify-center rounded-full ring-2 ${todayRingColor}`}
+                  className={`flex h-8 w-8 items-center justify-center rounded-full ring-3 ${todayRingColor}`}
                 >
                   {format(day, 'd')}
                 </span>
@@ -460,7 +573,7 @@ export default function CalendarView() {
         <LegendItem color="bg-phase-menstrual" label="Menstrual" />
         <LegendItem color="bg-phase-follicular" label="Follicular" />
         <LegendItem
-          color="border-2 border-phase-fertile bg-white"
+          color="ring-4 ring-inset ring-phase-fertile"
           label="Fertile"
         />
         <LegendItem color="bg-phase-ovulation" label="Ovulation" />
@@ -481,43 +594,61 @@ export default function CalendarView() {
             </DrawerTitle>
           </DrawerHeader>
           <div className="overflow-y-auto px-4 pb-8">
-            {/* Period Actions */}
-            <div className="mb-6 flex gap-2">
-              {selectedDateInfo.isPeriodStart ? (
-                <Button
-                  variant="outline"
-                  className="h-12 flex-1 border-red-500 text-red-500 hover:bg-red-50"
-                  onClick={handleRemovePeriodStart}
+            {/* Day Type Radio Buttons */}
+            <div className="mb-6">
+              <h3 className="mb-2 text-sm font-medium text-gray-500">Day Type</h3>
+              <div className="grid grid-cols-4 gap-2">
+                <button
+                  onClick={() => handleDayTypeChange('none')}
+                  className={`flex h-12 flex-col items-center justify-center rounded-lg border-2 text-xs transition-colors ${
+                    selectedDayType === 'none'
+                      ? 'border-brand-fuchsia bg-brand-fuchsia/10 text-brand-fuchsia'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
                 >
-                  Remove Start
-                </Button>
-              ) : (
-                <Button
-                  className="h-12 flex-1 bg-brand-red text-white hover:bg-brand-red/90"
-                  onClick={handleMarkPeriodStart}
+                  <span className="text-lg">⬜</span>
+                  <span>None</span>
+                </button>
+                <button
+                  onClick={() => handleDayTypeChange('period_start')}
+                  className={`flex h-12 flex-col items-center justify-center rounded-lg border-2 text-xs transition-colors ${
+                    selectedDayType === 'period_start'
+                      ? 'border-brand-red bg-brand-red/10 text-brand-red'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
                 >
-                  Period Start
-                </Button>
-              )}
-
-              {selectedDateInfo.isPeriodEnd ? (
-                <Button
-                  variant="outline"
-                  className="h-12 flex-1 border-red-500 text-red-500 hover:bg-red-50"
-                  onClick={handleRemovePeriodEnd}
+                  <span className="text-lg">🔴</span>
+                  <span>Start</span>
+                </button>
+                <button
+                  onClick={() => handleDayTypeChange('period_end')}
+                  disabled={!canSetPeriodEnd() && selectedDayType !== 'period_end'}
+                  className={`flex h-12 flex-col items-center justify-center rounded-lg border-2 text-xs transition-colors ${
+                    selectedDayType === 'period_end'
+                      ? 'border-brand-red bg-brand-red/10 text-brand-red'
+                      : !canSetPeriodEnd()
+                      ? 'cursor-not-allowed border-gray-100 text-gray-300'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
                 >
-                  Remove End
-                </Button>
-              ) : (
-                <Button
-                  variant="outline"
-                  className="h-12 flex-1 border-brand-red text-brand-red hover:bg-brand-red/10"
-                  onClick={handleMarkPeriodEnd}
-                  disabled={!cycles.some((c) => !c.period_end_date)}
+                  <span className="text-lg">🟢</span>
+                  <span>End</span>
+                </button>
+                <button
+                  onClick={() => handleDayTypeChange('ovulation')}
+                  disabled={!canSetOvulation() && selectedDayType !== 'ovulation'}
+                  className={`flex h-12 flex-col items-center justify-center rounded-lg border-2 text-xs transition-colors ${
+                    selectedDayType === 'ovulation'
+                      ? 'border-phase-ovulation bg-phase-ovulation/10 text-phase-ovulation'
+                      : !canSetOvulation()
+                      ? 'cursor-not-allowed border-gray-100 text-gray-300'
+                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                  }`}
                 >
-                  Period End
-                </Button>
-              )}
+                  <span className="text-lg">🥚</span>
+                  <span>Ovulation</span>
+                </button>
+              </div>
             </div>
 
             {/* Symptoms */}

@@ -1,20 +1,78 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { format } from 'date-fns';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { db } from '@/lib/db';
 import {
-  calculateAverageCycleLength,
-  calculateAveragePeriodDuration,
-  getCycleLengthVariation,
-  getNextPredictedPeriod,
-  getNextPredictedOvulation,
+  getCycleLengthStats,
+  getPeriodDurationStats,
+  getDaysUntilOvulationStats,
+  getSymptomsForPhaseHistory,
+  type PhaseSymptomHistory,
 } from '@/lib/cycle-logic';
 import type { Cycle, Symptom } from '@/types';
+import { PhaseType } from '@/types';
 
-interface SymptomCount {
-  symptom: string;
-  count: number;
+const PHASE_INFO: Record<PhaseType, { name: string; color: string; bgColor: string }> = {
+  [PhaseType.MENSTRUAL]: {
+    name: 'Menstrual',
+    color: 'text-phase-menstrual',
+    bgColor: 'bg-phase-menstrual',
+  },
+  [PhaseType.FOLLICULAR]: {
+    name: 'Follicular',
+    color: 'text-phase-follicular',
+    bgColor: 'bg-phase-follicular',
+  },
+  [PhaseType.FERTILE]: {
+    name: 'Fertile',
+    color: 'text-phase-fertile',
+    bgColor: 'bg-phase-fertile',
+  },
+  [PhaseType.OVULATION]: {
+    name: 'Ovulation',
+    color: 'text-phase-ovulation',
+    bgColor: 'bg-phase-ovulation',
+  },
+  [PhaseType.LUTEAL]: {
+    name: 'Luteal',
+    color: 'text-phase-luteal',
+    bgColor: 'bg-phase-luteal',
+  },
+};
+
+const SYMPTOM_LABELS: Record<string, string> = {
+  cramps: 'Cramps',
+  headache: 'Headache',
+  bloating: 'Bloating',
+  breast_tenderness: 'Breast Tenderness',
+  fatigue: 'Fatigue',
+  backache: 'Backache',
+  nausea: 'Nausea',
+  acne: 'Acne',
+  insomnia: 'Insomnia',
+  cravings: 'Cravings',
+  flow_light: 'Light Flow',
+  flow_medium: 'Medium Flow',
+  flow_heavy: 'Heavy Flow',
+  spotting: 'Spotting',
+  mood_happy: 'Happy',
+  mood_sad: 'Sad',
+  mood_irritable: 'Irritable',
+  mood_anxious: 'Anxious',
+  mood_calm: 'Calm',
+  mood_horny: 'Horny',
+};
+
+// Phases to show in symptoms section (excluding FERTILE as it overlaps with others)
+const SYMPTOM_PHASES: PhaseType[] = [
+  PhaseType.MENSTRUAL,
+  PhaseType.FOLLICULAR,
+  PhaseType.OVULATION,
+  PhaseType.LUTEAL,
+];
+
+function getSymptomLabel(symptom: string): string {
+  return SYMPTOM_LABELS[symptom] || symptom.replace(/_/g, ' ');
 }
 
 export default function InsightsView() {
@@ -41,6 +99,41 @@ export default function InsightsView() {
     loadData();
   }, [loadData]);
 
+  const cycleLengthStats = useMemo(() => getCycleLengthStats(cycles, 6), [cycles]);
+  const periodDurationStats = useMemo(() => getPeriodDurationStats(cycles, 6), [cycles]);
+  const ovulationStats = useMemo(() => getDaysUntilOvulationStats(cycles, 6), [cycles]);
+
+  // Calculate symptoms by phase - always compute for all 4 phases
+  const symptomsByPhase = useMemo(() => {
+    const result: Record<PhaseType, PhaseSymptomHistory[]> = {} as Record<PhaseType, PhaseSymptomHistory[]>;
+
+    if (cycles.length === 0) {
+      // Return empty arrays for all phases
+      SYMPTOM_PHASES.forEach((phase) => {
+        result[phase] = [];
+      });
+      return result;
+    }
+
+    const avgCycleLength = cycleLengthStats?.avg || 28;
+
+    SYMPTOM_PHASES.forEach((phase) => {
+      const phaseSymptoms = getSymptomsForPhaseHistory(
+        phase,
+        cycles,
+        symptoms,
+        avgCycleLength,
+        6
+      );
+      result[phase] = phaseSymptoms.slice(0, 3); // Top 3 per phase
+    });
+
+    return result;
+  }, [cycles, symptoms, cycleLengthStats]);
+
+  // Check if there are any symptoms recorded
+  const hasAnySymptoms = symptoms.length > 0;
+
   if (isLoading) {
     return (
       <div className="flex h-full items-center justify-center p-4">
@@ -63,141 +156,143 @@ export default function InsightsView() {
     );
   }
 
-  const averageCycleLength = calculateAverageCycleLength(cycles);
-  const averagePeriodDuration = calculateAveragePeriodDuration(cycles);
-  const variation = getCycleLengthVariation(cycles);
-  const nextPeriod = getNextPredictedPeriod(cycles, averageCycleLength);
-  const nextOvulation = getNextPredictedOvulation(cycles, averageCycleLength);
-
-  // Calculate most common symptoms
-  const symptomCounts: Record<string, number> = {};
-  symptoms.forEach((s) => {
-    symptomCounts[s.symptom_type] = (symptomCounts[s.symptom_type] || 0) + 1;
-  });
-
-  const topSymptoms: SymptomCount[] = Object.entries(symptomCounts)
-    .map(([symptom, count]) => ({ symptom, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5);
-
   return (
     <div className="p-4">
       <h1 className="mb-6 text-2xl font-semibold text-gray-900">Insights</h1>
-
-      {/* Predictions */}
-      <section className="mb-6">
-        <h2 className="mb-3 text-lg font-medium text-gray-700">Predictions</h2>
-        <div className="grid grid-cols-2 gap-3">
-          <StatCard
-            label="Next Period"
-            value={nextPeriod ? format(new Date(nextPeriod), 'MMM d') : '-'}
-            color="bg-phase-menstrual"
-          />
-          <StatCard
-            label="Next Ovulation"
-            value={
-              nextOvulation ? format(new Date(nextOvulation), 'MMM d') : '-'
-            }
-            color="bg-phase-ovulation"
-          />
-        </div>
-      </section>
 
       {/* Cycle Statistics */}
       <section className="mb-6">
         <h2 className="mb-3 text-lg font-medium text-gray-700">
           Cycle Statistics
         </h2>
-        <div className="grid grid-cols-2 gap-3">
-          <StatCard
-            label="Avg Cycle Length"
-            value={`${averageCycleLength} days`}
+        <p className="mb-3 text-xs text-gray-500">Based on your last 6 cycles</p>
+
+        <div className="space-y-4">
+          {/* Cycle Length */}
+          <StatGroup
+            title="Cycle Length"
+            stats={cycleLengthStats}
+            unit="days"
             color="bg-brand-pink"
           />
-          <StatCard
-            label="Avg Period Duration"
-            value={
-              averagePeriodDuration ? `${averagePeriodDuration} days` : '-'
-            }
-            color="bg-brand-pink"
+
+          {/* Period Duration */}
+          <StatGroup
+            title="Period Duration"
+            stats={periodDurationStats}
+            unit="days"
+            color="bg-phase-menstrual"
           />
-          {variation && (
-            <>
-              <StatCard
-                label="Shortest Cycle"
-                value={`${variation.min} days`}
-                color="bg-gray-100"
-                textColor="text-gray-700"
-              />
-              <StatCard
-                label="Longest Cycle"
-                value={`${variation.max} days`}
-                color="bg-gray-100"
-                textColor="text-gray-700"
-              />
-            </>
-          )}
+
+          {/* Days Until Ovulation */}
+          <StatGroup
+            title="Days Until Ovulation"
+            stats={ovulationStats}
+            unit="days"
+            color="bg-phase-ovulation"
+          />
         </div>
       </section>
 
       {/* Cycle Count */}
       <section className="mb-6">
         <h2 className="mb-3 text-lg font-medium text-gray-700">History</h2>
-        <div className="rounded-lg bg-gray-50 p-4">
-          <div className="text-3xl font-bold text-brand-red">{cycles.length}</div>
-          <div className="text-sm text-gray-600">Periods tracked</div>
+        <div className="rounded-lg bg-gray-100 p-4">
+          <div className="text-sm font-medium text-gray-700">Periods Tracked</div>
+          <div className="text-3xl font-bold text-gray-900">{cycles.length}</div>
         </div>
       </section>
 
-      {/* Common Symptoms */}
-      {topSymptoms.length > 0 && (
-        <section className="mb-6">
-          <h2 className="mb-3 text-lg font-medium text-gray-700">
-            Most Common Symptoms
-          </h2>
-          <div className="space-y-2">
-            {topSymptoms.map(({ symptom, count }) => (
-              <div
-                key={symptom}
-                className="flex items-center justify-between rounded-lg bg-gray-50 p-3"
-              >
-                <span className="capitalize text-gray-700">
-                  {formatSymptomName(symptom)}
-                </span>
-                <span className="font-medium text-brand-red">{count}x</span>
+      {/* Symptoms by Phase - Always show all 4 phases */}
+      <section className="mb-6">
+        <h2 className="mb-3 text-lg font-medium text-gray-700">
+          Common Symptoms by Phase
+        </h2>
+        <div className="space-y-4">
+          {SYMPTOM_PHASES.map((phase) => {
+            const info = PHASE_INFO[phase];
+            const phaseSymptoms = symptomsByPhase[phase] || [];
+
+            return (
+              <div key={phase} className="rounded-lg border border-gray-200 p-3">
+                <div className="mb-2 flex items-center gap-2">
+                  <div className={`h-3 w-3 rounded-full ${info.bgColor}`} />
+                  <h3 className="text-sm font-medium text-gray-900">
+                    {info.name}
+                  </h3>
+                </div>
+                {phaseSymptoms.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {phaseSymptoms.map(({ symptom, percentage }) => (
+                      <div
+                        key={symptom}
+                        className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1"
+                      >
+                        <span className="text-xs text-gray-700">
+                          {getSymptomLabel(symptom)}
+                        </span>
+                        <span className={`text-xs font-medium ${info.color}`}>
+                          {percentage}%
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-gray-500">
+                    {hasAnySymptoms
+                      ? 'No symptoms recorded for this phase yet'
+                      : 'Enter some symptoms in the calendar to see them here'}
+                  </p>
+                )}
               </div>
-            ))}
-          </div>
-        </section>
-      )}
+            );
+          })}
+        </div>
+      </section>
     </div>
   );
 }
 
-interface StatCardProps {
-  label: string;
-  value: string;
+interface StatGroupProps {
+  title: string;
+  stats: { min: number; max: number; avg: number } | null;
+  unit: string;
   color: string;
-  textColor?: string;
 }
 
-function StatCard({
-  label,
-  value,
-  color,
-  textColor = 'text-white',
-}: StatCardProps) {
+function StatGroup({ title, stats, unit, color }: StatGroupProps) {
+  if (!stats) {
+    return (
+      <div className="rounded-lg bg-gray-100 p-4">
+        <div className="text-sm font-medium text-gray-700">{title}</div>
+        <div className="text-lg text-gray-500">Not enough data</div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`rounded-lg p-4 ${color}`}>
-      <div className={`text-2xl font-bold ${textColor}`}>{value}</div>
-      <div className={`text-sm ${textColor} opacity-80`}>{label}</div>
+    <div className="rounded-lg bg-gray-50 p-4">
+      <div className="mb-3 text-sm font-medium text-gray-700">{title}</div>
+      <div className="grid grid-cols-3 gap-2">
+        <div className={`rounded-lg p-3 ${color}`}>
+          <div className="text-xs font-medium text-white/80">Average</div>
+          <div className="text-xl font-bold text-white">
+            {stats.avg} <span className="text-sm font-normal">{unit}</span>
+          </div>
+        </div>
+        <div className="rounded-lg bg-gray-200 p-3">
+          <div className="text-xs font-medium text-gray-600">Shortest</div>
+          <div className="text-xl font-bold text-gray-900">
+            {stats.min} <span className="text-sm font-normal text-gray-600">{unit}</span>
+          </div>
+        </div>
+        <div className="rounded-lg bg-gray-200 p-3">
+          <div className="text-xs font-medium text-gray-600">Longest</div>
+          <div className="text-xl font-bold text-gray-900">
+            {stats.max} <span className="text-sm font-normal text-gray-600">{unit}</span>
+          </div>
+        </div>
+      </div>
     </div>
   );
-}
-
-function formatSymptomName(symptom: string): string {
-  return symptom
-    .replace(/_/g, ' ')
-    .replace(/^(flow|mood)\s/, '')
-    .toLowerCase();
 }

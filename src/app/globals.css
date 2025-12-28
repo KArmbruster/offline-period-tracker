@@ -6,13 +6,13 @@
 :root {
   /* Brand Colors */
   --color-red: #B3014F;
-  --color-light-pink: #FFABD4;
+  --color-light-pink: #ec66a7;
   --color-white: #FFFFFF;
   --color-fuchsia: #FE68A7;
 
   /* Phase Colors */
   --color-menstrual: #B3014F;
-  --color-follicular: #14B8A6;
+  --color-follicular: #24b2c5;
   --color-fertile: #22C55E;
   --color-ovulation: #22C55E;
   --color-luteal: #3B82F6;

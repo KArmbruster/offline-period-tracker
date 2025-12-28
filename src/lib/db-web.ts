@@ -230,6 +230,16 @@ class WebDatabaseService {
     this.setStoredData(STORAGE_KEYS.OVULATION_MARKERS, markers.filter(m => m.id !== id));
   }
 
+  async getOvulationMarkerByDate(date: string): Promise<OvulationMarker | null> {
+    const markers = this.getStoredData<OvulationMarker>(STORAGE_KEYS.OVULATION_MARKERS);
+    return markers.find(m => m.date === date) || null;
+  }
+
+  async deleteOvulationMarkerByDate(date: string): Promise<void> {
+    const markers = this.getStoredData<OvulationMarker>(STORAGE_KEYS.OVULATION_MARKERS);
+    this.setStoredData(STORAGE_KEYS.OVULATION_MARKERS, markers.filter(m => m.date !== date));
+  }
+
   // Export/Import
   async exportAllData(): Promise<{
     cycles: Cycle[];

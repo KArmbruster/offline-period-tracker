@@ -21,6 +21,7 @@ export enum SymptomType {
   MOOD_IRRITABLE = 'mood_irritable',
   MOOD_ANXIOUS = 'mood_anxious',
   MOOD_CALM = 'mood_calm',
+  MOOD_HORNY = 'mood_horny',
 
   // Other
   ACNE = 'acne',
