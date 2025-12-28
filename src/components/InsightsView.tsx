@@ -103,6 +103,9 @@ export default function InsightsView() {
   const periodDurationStats = useMemo(() => getPeriodDurationStats(cycles, 6), [cycles]);
   const ovulationStats = useMemo(() => getDaysUntilOvulationStats(cycles, 6), [cycles]);
 
+  // Number of cycles to analyze (max 6)
+  const cyclesAnalyzed = Math.min(cycles.length, 6);
+
   // Calculate symptoms by phase - always compute for all 4 phases
   const symptomsByPhase = useMemo(() => {
     const result: Record<PhaseType, PhaseSymptomHistory[]> = {} as Record<PhaseType, PhaseSymptomHistory[]>;
@@ -125,7 +128,8 @@ export default function InsightsView() {
         avgCycleLength,
         6
       );
-      result[phase] = phaseSymptoms.slice(0, 3); // Top 3 per phase
+      // Show all symptoms, not just top 3
+      result[phase] = phaseSymptoms;
     });
 
     return result;
@@ -223,7 +227,7 @@ export default function InsightsView() {
                 </div>
                 {phaseSymptoms.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
-                    {phaseSymptoms.map(({ symptom, percentage }) => (
+                    {phaseSymptoms.map(({ symptom, occurrences }) => (
                       <div
                         key={symptom}
                         className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1"
@@ -232,7 +236,7 @@ export default function InsightsView() {
                           {getSymptomLabel(symptom)}
                         </span>
                         <span className={`text-xs font-medium ${info.color}`}>
-                          {percentage}%
+                          {occurrences}/{cyclesAnalyzed}
                         </span>
                       </div>
                     ))}
