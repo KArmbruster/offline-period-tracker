@@ -26,7 +26,7 @@ const slides: SlideData[] = [
   },
   {
     title: 'Your Data Stays Yours',
-    content: 'No analytics, no tracking, no third-party services. Your menstrual health data is stored only on this device.',
+    content: 'No analytics, no tracking, no third-party services. Your menstrual health data is stored only on this device. To prevent data loss we recommend you regularly export the data and store it somewhere safe.',
   },
   {
     title: 'Install as App',

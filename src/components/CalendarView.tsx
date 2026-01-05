@@ -734,16 +734,13 @@ export default function CalendarView() {
         onTouchEnd={handleTouchEnd}
       >
         {calendarDays.map((day) => {
-          const isCurrentMonth = isSameMonth(day, currentMonth);
           const isToday = isSameDay(day, new Date());
           const isFuture = isFutureDate(day);
           // Always calculate phase info for all days (including prev/next month)
           const { phase, isPrediction, isFertile } = getDayPhaseInfo(day);
           // Apply phase colors to all days, but mute non-current-month days
           const baseStyles = getDayStyles(phase, isPrediction, isFertile);
-          const dayStyles = isCurrentMonth
-            ? baseStyles
-            : `${baseStyles} opacity-40`;
+          const dayStyles =  baseStyles
           const todayRingColor = getTodayRingColor(phase);
           const dayEntries = !isFuture ? getDayEntries(day) : null;
 
@@ -753,12 +750,12 @@ export default function CalendarView() {
               onClick={() => handleDayClick(day)}
               disabled={isFuture}
               className={`relative flex h-12 items-center justify-center rounded-lg text-sm font-medium transition-colors ${dayStyles} ${
-                isFuture ? 'cursor-not-allowed opacity-50' : ''
+                isFuture ? 'cursor-not-allowed opacity-70' : ''
               }`}
             >
               {isToday ? (
                 <span
-                  className={`flex h-8 w-8 items-center justify-center rounded-full ring-3 ${todayRingColor}`}
+                  className={`flex h-6 w-6 items-center justify-center rounded-full ring-6 ${todayRingColor}`}
                 >
                   {format(day, 'd')}
                 </span>

@@ -82,7 +82,7 @@ export default function SettingsView() {
 
   const handleReset = useCallback(async () => {
     const confirmed = confirm(
-      'This will delete ALL data. This cannot be undone. Are you absolutely sure?'
+      'This will delete ALL data. This cannot be undone. Are you absolutely sure? We suggest you Export your Data and save it somewhere.'
     );
 
     if (!confirmed) return;
