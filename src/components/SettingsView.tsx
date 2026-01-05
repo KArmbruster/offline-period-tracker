@@ -141,6 +141,9 @@ export default function SettingsView() {
         <p className="mt-2 text-xs text-gray-400">
           Your data never leaves your device.
         </p>
+        <p className="mt-2 text-xs text-gray-400">
+          Version 1.1
+        </p>
       </div>
 
       {/* User Guide Drawer */}

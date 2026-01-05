@@ -262,64 +262,6 @@ export function getDaysUntilNextPeriod(
   };
 }
 
-/**
- * Get next predicted ovulation date
- */
-export function getNextPredictedOvulation(
-  cycles: Cycle[],
-  cycleLength: number
-): string | null {
-  const nextPeriod = getNextPredictedPeriod(cycles, cycleLength);
-
-  if (!nextPeriod) {
-    return null;
-  }
-
-  const periodDate = parseISO(nextPeriod);
-  const ovulationDate = addDays(periodDate, -OVULATION_OFFSET);
-
-  // If ovulation is in the past, calculate for the next cycle
-  const today = startOfDay(new Date());
-  if (ovulationDate < today) {
-    return format(addDays(ovulationDate, cycleLength), 'yyyy-MM-dd');
-  }
-
-  return format(ovulationDate, 'yyyy-MM-dd');
-}
-
-/**
- * Get cycle length variation (min and max)
- */
-export function getCycleLengthVariation(cycles: Cycle[]): { min: number; max: number } | null {
-  if (cycles.length < 2) {
-    return null;
-  }
-
-  const sortedCycles = [...cycles].sort(
-    (a, b) => parseISO(a.period_start_date).getTime() - parseISO(b.period_start_date).getTime()
-  );
-
-  const lengths: number[] = [];
-
-  for (let i = 1; i < sortedCycles.length; i++) {
-    const currentStart = parseISO(sortedCycles[i].period_start_date);
-    const previousStart = parseISO(sortedCycles[i - 1].period_start_date);
-    const length = differenceInDays(currentStart, previousStart);
-
-    if (length > 0 && length < 60) {
-      lengths.push(length);
-    }
-  }
-
-  if (lengths.length === 0) {
-    return null;
-  }
-
-  return {
-    min: Math.min(...lengths),
-    max: Math.max(...lengths),
-  };
-}
 
 /**
  * Get period duration variation (min, max, avg) from last N cycles
@@ -349,49 +291,6 @@ export function getPeriodDurationStats(cycles: Cycle[], maxCycles: number = 6): 
     min: Math.min(...durations),
     max: Math.max(...durations),
     avg: Math.round(sum / durations.length),
-  };
-}
-
-/**
- * Get days until ovulation stats (min, max, avg) from last N cycles
- * Days until ovulation = cycleLength - 14 (ovulation offset)
- */
-export function getDaysUntilOvulationStats(cycles: Cycle[], maxCycles: number = 6): { min: number; max: number; avg: number } | null {
-  if (cycles.length < 2) {
-    return null;
-  }
-
-  // Sort by start date descending
-  const sortedCycles = [...cycles].sort(
-    (a, b) => parseISO(b.period_start_date).getTime() - parseISO(a.period_start_date).getTime()
-  );
-
-  // Take up to last N+1 cycles to get N intervals
-  const recentCycles = sortedCycles.slice(0, maxCycles + 1);
-  const cycleLengths: number[] = [];
-
-  for (let i = 0; i < recentCycles.length - 1 && cycleLengths.length < maxCycles; i++) {
-    const currentStart = parseISO(recentCycles[i].period_start_date);
-    const previousStart = parseISO(recentCycles[i + 1].period_start_date);
-    const length = differenceInDays(currentStart, previousStart);
-
-    if (length > 0 && length < 60) {
-      cycleLengths.push(length);
-    }
-  }
-
-  if (cycleLengths.length === 0) {
-    return null;
-  }
-
-  // Days until ovulation = cycle length - 14
-  const daysUntilOvulation = cycleLengths.map((len) => len - OVULATION_OFFSET);
-  const sum = daysUntilOvulation.reduce((a, b) => a + b, 0);
-
-  return {
-    min: Math.min(...daysUntilOvulation),
-    max: Math.max(...daysUntilOvulation),
-    avg: Math.round(sum / daysUntilOvulation.length),
   };
 }
 
@@ -460,7 +359,7 @@ export function findCycleForDate(date: Date, cycles: Cycle[]): Cycle | null {
 /**
  * Get the date range for a specific phase within a cycle
  */
-export function getPhaseDateRange(
+function getPhaseDateRange(
   cycle: Cycle,
   phase: PhaseType,
   cycleLength: number,
@@ -509,7 +408,7 @@ export function getPhaseDateRange(
 /**
  * Get all dates that fall within a specific phase for a cycle
  */
-export function getPhaseDates(
+function getPhaseDates(
   cycle: Cycle,
   phase: PhaseType,
   cycleLength: number,

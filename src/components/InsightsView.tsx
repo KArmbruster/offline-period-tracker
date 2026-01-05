@@ -8,6 +8,7 @@ import {
   getSymptomsForPhaseHistory,
   type PhaseSymptomHistory,
 } from '@/lib/cycle-logic';
+import { getSymptomLabel, isPeriodPainSymptom, calculateAveragePain } from '@/lib/symptom-utils';
 import type { Cycle, Symptom, CustomSymptomType } from '@/types';
 import { PhaseType } from '@/types';
 
@@ -39,29 +40,6 @@ const PHASE_INFO: Record<PhaseType, { name: string; color: string; bgColor: stri
   },
 };
 
-const SYMPTOM_LABELS: Record<string, string> = {
-  cramps: 'Cramps',
-  headache: 'Headache',
-  bloating: 'Bloating',
-  breast_tenderness: 'Breast Tenderness',
-  fatigue: 'Fatigue',
-  backache: 'Backache',
-  nausea: 'Nausea',
-  acne: 'Acne',
-  insomnia: 'Insomnia',
-  cravings: 'Cravings',
-  flow_light: 'Light Flow',
-  flow_medium: 'Medium Flow',
-  flow_heavy: 'Heavy Flow',
-  spotting: 'Spotting',
-  mood_happy: 'Happy',
-  mood_sad: 'Sad',
-  mood_irritable: 'Irritable',
-  mood_anxious: 'Anxious',
-  mood_calm: 'Calm',
-  mood_horny: 'Horny',
-};
-
 // Phases to show in symptoms section (excluding FERTILE as it overlaps with others)
 const SYMPTOM_PHASES: PhaseType[] = [
   PhaseType.MENSTRUAL,
@@ -69,59 +47,6 @@ const SYMPTOM_PHASES: PhaseType[] = [
   PhaseType.OVULATION,
   PhaseType.LUTEAL,
 ];
-
-function getSymptomLabel(symptom: string, customTypes: CustomSymptomType[]): string {
-  // Check if it's a built-in symptom
-  if (SYMPTOM_LABELS[symptom]) {
-    return SYMPTOM_LABELS[symptom];
-  }
-
-  // Check if it's a custom symptom (format: custom_${id})
-  if (symptom.startsWith('custom_')) {
-    const customId = parseInt(symptom.replace('custom_', ''), 10);
-    const customType = customTypes.find((c) => c.id === customId);
-    if (customType) {
-      return customType.name;
-    }
-  }
-
-  // Fallback: replace underscores with spaces
-  return symptom.replace(/_/g, ' ');
-}
-
-// Check if a symptom is a period pain level
-function isPeriodPainSymptom(symptom: string): boolean {
-  return symptom.startsWith('period_pain_');
-}
-
-// Extract pain level number from symptom type
-function getPainLevel(symptom: string): number {
-  const match = symptom.match(/period_pain_(\d+)/);
-  return match ? parseInt(match[1], 10) : 0;
-}
-
-// Calculate average pain for a phase from symptoms
-function calculateAveragePain(
-  phaseSymptoms: PhaseSymptomHistory[]
-): { avg: number; count: number } | null {
-  const painSymptoms = phaseSymptoms.filter((s) => isPeriodPainSymptom(s.symptom));
-  if (painSymptoms.length === 0) return null;
-
-  // Calculate weighted average based on occurrences
-  let totalPain = 0;
-  let totalOccurrences = 0;
-
-  painSymptoms.forEach(({ symptom, occurrences }) => {
-    const level = getPainLevel(symptom);
-    totalPain += level * occurrences;
-    totalOccurrences += occurrences;
-  });
-
-  return {
-    avg: Math.round((totalPain / totalOccurrences) * 10) / 10,
-    count: totalOccurrences,
-  };
-}
 
 export default function InsightsView() {
   const [cycles, setCycles] = useState<Cycle[]>([]);
@@ -282,10 +207,10 @@ export default function InsightsView() {
                         </span>
                       </div>
                     ))}
-                    {avgPain && (
+                    {avgPain !== null && (
                       <div className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1">
                         <span className="text-xs text-gray-700">
-                          Pain (Ø {avgPain.avg.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })})
+                          Pain (Ø {avgPain.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })})
                         </span>
                       </div>
                     )}
