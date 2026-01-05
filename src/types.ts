@@ -27,6 +27,18 @@ export enum SymptomType {
   ACNE = 'acne',
   INSOMNIA = 'insomnia',
   CRAVINGS = 'cravings',
+
+  // Period Pain (1-10 scale)
+  PERIOD_PAIN_1 = 'period_pain_1',
+  PERIOD_PAIN_2 = 'period_pain_2',
+  PERIOD_PAIN_3 = 'period_pain_3',
+  PERIOD_PAIN_4 = 'period_pain_4',
+  PERIOD_PAIN_5 = 'period_pain_5',
+  PERIOD_PAIN_6 = 'period_pain_6',
+  PERIOD_PAIN_7 = 'period_pain_7',
+  PERIOD_PAIN_8 = 'period_pain_8',
+  PERIOD_PAIN_9 = 'period_pain_9',
+  PERIOD_PAIN_10 = 'period_pain_10',
 }
 
 // Phase Types
@@ -84,27 +96,4 @@ export interface ExportData {
   symptoms: Symptom[];
   custom_symptom_types: CustomSymptomType[];
   day_notes: DayNote[];
-}
-
-// Insights
-export interface CycleInsights {
-  averageCycleLength: number | null;
-  shortestCycle: number | null;
-  longestCycle: number | null;
-  averagePeriodDuration: number | null;
-  mostCommonSymptoms: { symptom: string; count: number }[];
-  nextPredictedPeriod: string | null;
-  nextPredictedOvulation: string | null;
-}
-
-// Calendar Day Info
-export interface DayInfo {
-  date: string;
-  phase: PhaseType | null;
-  isToday: boolean;
-  isPredicted: boolean;
-  symptoms: Symptom[];
-  hasPeriodStart: boolean;
-  hasPeriodEnd: boolean;
-  hasOvulationDate: boolean;
 }

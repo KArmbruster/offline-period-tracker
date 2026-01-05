@@ -5,7 +5,6 @@ import { db } from '@/lib/db';
 import {
   getCycleLengthStats,
   getPeriodDurationStats,
-  getDaysUntilOvulationStats,
   getSymptomsForPhaseHistory,
   type PhaseSymptomHistory,
 } from '@/lib/cycle-logic';
@@ -90,6 +89,40 @@ function getSymptomLabel(symptom: string, customTypes: CustomSymptomType[]): str
   return symptom.replace(/_/g, ' ');
 }
 
+// Check if a symptom is a period pain level
+function isPeriodPainSymptom(symptom: string): boolean {
+  return symptom.startsWith('period_pain_');
+}
+
+// Extract pain level number from symptom type
+function getPainLevel(symptom: string): number {
+  const match = symptom.match(/period_pain_(\d+)/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+// Calculate average pain for a phase from symptoms
+function calculateAveragePain(
+  phaseSymptoms: PhaseSymptomHistory[]
+): { avg: number; count: number } | null {
+  const painSymptoms = phaseSymptoms.filter((s) => isPeriodPainSymptom(s.symptom));
+  if (painSymptoms.length === 0) return null;
+
+  // Calculate weighted average based on occurrences
+  let totalPain = 0;
+  let totalOccurrences = 0;
+
+  painSymptoms.forEach(({ symptom, occurrences }) => {
+    const level = getPainLevel(symptom);
+    totalPain += level * occurrences;
+    totalOccurrences += occurrences;
+  });
+
+  return {
+    avg: Math.round((totalPain / totalOccurrences) * 10) / 10,
+    count: totalOccurrences,
+  };
+}
+
 export default function InsightsView() {
   const [cycles, setCycles] = useState<Cycle[]>([]);
   const [symptoms, setSymptoms] = useState<Symptom[]>([]);
@@ -119,7 +152,6 @@ export default function InsightsView() {
 
   const cycleLengthStats = useMemo(() => getCycleLengthStats(cycles, 6), [cycles]);
   const periodDurationStats = useMemo(() => getPeriodDurationStats(cycles, 6), [cycles]);
-  const ovulationStats = useMemo(() => getDaysUntilOvulationStats(cycles, 6), [cycles]);
 
   // Number of cycles to analyze (max 6)
   const cyclesAnalyzed = Math.min(cycles.length, 6);
@@ -196,6 +228,7 @@ export default function InsightsView() {
             stats={cycleLengthStats}
             unit="days"
             color="bg-brand-pink"
+            emptyHint="Track the actual Beginning of your period at least twice to see data here"
           />
 
           {/* Period Duration */}
@@ -204,24 +237,8 @@ export default function InsightsView() {
             stats={periodDurationStats}
             unit="days"
             color="bg-phase-menstrual"
+            emptyHint="Track the actual End of your period at least twice to see data here"
           />
-
-          {/* Days Until Ovulation */}
-          <StatGroup
-            title="Days Until Ovulation"
-            stats={ovulationStats}
-            unit="days"
-            color="bg-phase-ovulation"
-          />
-        </div>
-      </section>
-
-      {/* Cycle Count */}
-      <section className="mb-6">
-        <h2 className="mb-3 text-lg font-medium text-gray-700">History</h2>
-        <div className="rounded-lg bg-gray-100 p-4">
-          <div className="text-sm font-medium text-gray-700">Periods Tracked</div>
-          <div className="text-3xl font-bold text-gray-900">{cycles.length}</div>
         </div>
       </section>
 
@@ -234,6 +251,13 @@ export default function InsightsView() {
           {SYMPTOM_PHASES.map((phase) => {
             const info = PHASE_INFO[phase];
             const phaseSymptoms = symptomsByPhase[phase] || [];
+            // Filter out individual pain levels
+            const nonPainSymptoms = phaseSymptoms.filter(
+              (s) => !isPeriodPainSymptom(s.symptom)
+            );
+            // Calculate average pain for this phase
+            const avgPain = calculateAveragePain(phaseSymptoms);
+            const hasSymptoms = nonPainSymptoms.length > 0 || avgPain !== null;
 
             return (
               <div key={phase} className="rounded-lg border border-gray-200 p-3">
@@ -243,9 +267,9 @@ export default function InsightsView() {
                     {info.name}
                   </h3>
                 </div>
-                {phaseSymptoms.length > 0 ? (
+                {hasSymptoms ? (
                   <div className="flex flex-wrap gap-2">
-                    {phaseSymptoms.map(({ symptom, occurrences }) => (
+                    {nonPainSymptoms.map(({ symptom, occurrences }) => (
                       <div
                         key={symptom}
                         className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1"
@@ -258,6 +282,13 @@ export default function InsightsView() {
                         </span>
                       </div>
                     ))}
+                    {avgPain && (
+                      <div className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1">
+                        <span className="text-xs text-gray-700">
+                          Pain (Ø {avgPain.avg.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })})
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <p className="text-xs text-gray-500">
@@ -271,6 +302,16 @@ export default function InsightsView() {
           })}
         </div>
       </section>
+      
+      {/* Cycle Count */}
+      <section className="mb-6">
+        <h2 className="mb-3 text-lg font-medium text-gray-700">History</h2>
+        <div className="rounded-lg bg-gray-100 p-4">
+          <div className="text-sm font-medium text-gray-700">Periods Tracked</div>
+          <div className="text-3xl font-bold text-gray-900">{cycles.length}</div>
+        </div>
+      </section>
+
     </div>
   );
 }
@@ -280,14 +321,16 @@ interface StatGroupProps {
   stats: { min: number; max: number; avg: number } | null;
   unit: string;
   color: string;
+  emptyHint?: string;
 }
 
-function StatGroup({ title, stats, unit, color }: StatGroupProps) {
+function StatGroup({ title, stats, unit, color, emptyHint }: StatGroupProps) {
   if (!stats) {
     return (
       <div className="rounded-lg bg-gray-100 p-4">
         <div className="text-sm font-medium text-gray-700">{title}</div>
         <div className="text-lg text-gray-500">Not enough data</div>
+        {emptyHint && <div className="mt-1 text-xs text-gray-400">{emptyHint}</div>}
       </div>
     );
   }

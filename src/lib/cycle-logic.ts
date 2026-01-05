@@ -162,24 +162,6 @@ export function getPhaseForDate(
   return null;
 }
 
-/**
- * Predict future period start dates
- */
-export function predictFuturePeriods(
-  lastPeriodStart: string,
-  cycleLength: number,
-  monthsAhead: number = 12
-): string[] {
-  const predictions: string[] = [];
-  const start = parseISO(lastPeriodStart);
-
-  for (let i = 1; i <= monthsAhead; i++) {
-    const predictedDate = addDays(start, cycleLength * i);
-    predictions.push(format(predictedDate, 'yyyy-MM-dd'));
-  }
-
-  return predictions;
-}
 
 /**
  * Get predicted phase for a future date (beyond recorded cycles)
@@ -248,35 +230,6 @@ export function getPredictedPhaseForDate(
   return null;
 }
 
-/**
- * Get next predicted period date
- */
-export function getNextPredictedPeriod(
-  cycles: Cycle[],
-  cycleLength: number
-): string | null {
-  if (cycles.length === 0) {
-    return null;
-  }
-
-  // Get most recent cycle
-  const sortedCycles = [...cycles].sort(
-    (a, b) => parseISO(b.period_start_date).getTime() - parseISO(a.period_start_date).getTime()
-  );
-
-  const lastCycle = sortedCycles[0];
-  const lastStart = parseISO(lastCycle.period_start_date);
-  const nextPeriod = addDays(lastStart, cycleLength);
-
-  // If predicted date is in the past, add another cycle
-  const today = startOfDay(new Date());
-  if (nextPeriod < today) {
-    const cyclesPassed = Math.ceil(differenceInDays(today, nextPeriod) / cycleLength);
-    return format(addDays(nextPeriod, cycleLength * cyclesPassed), 'yyyy-MM-dd');
-  }
-
-  return format(nextPeriod, 'yyyy-MM-dd');
-}
 
 /**
  * Get days until next predicted period (can be negative if overdue)

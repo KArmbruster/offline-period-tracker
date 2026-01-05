@@ -12,7 +12,6 @@ interface OnboardingScreenProps {
 interface SlideData {
   title: string;
   content?: string;
-  isWarning?: boolean;
   isInstall?: boolean;
 }
 
@@ -27,16 +26,11 @@ const slides: SlideData[] = [
   },
   {
     title: 'Your Data Stays Yours',
-    content: 'No analytics, no tracking, no third-party services. Your menstrual health data is stored only on this device, encrypted and protected.',
+    content: 'No analytics, no tracking, no third-party services. Your menstrual health data is stored only on this device.',
   },
   {
     title: 'Install as App',
     isInstall: true,
-  },
-  {
-    title: 'Important: PIN Protection',
-    content: 'You\'ll create a 4-digit PIN to protect your data. This PIN encrypts everything locally. If you forget your PIN, your data cannot be recovered — there\'s no reset email or backup. Keep it safe!',
-    isWarning: true,
   },
 ];
 
@@ -94,9 +88,7 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
             {slide.title}
           </h1>
           {slide.content && (
-            <p className={`text-base leading-relaxed ${
-              slide.isWarning ? 'text-amber-700' : 'text-gray-600'
-            }`}>
+            <p className="text-base leading-relaxed text-gray-600">
               {slide.content}
             </p>
           )}
@@ -128,27 +120,6 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
           )}
         </div>
 
-        {/* Warning icon for last slide */}
-        {slide.isWarning && (
-          <div className="mb-8 flex justify-center">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
-              <svg
-                className="h-8 w-8 text-amber-600"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-            </div>
-          </div>
-        )}
-
         {/* Navigation */}
         <div className="flex gap-3">
           {currentSlide > 0 && (
@@ -164,7 +135,7 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
             className={`${currentSlide > 0 ? 'flex-1' : 'w-full'} h-14 text-base bg-brand-red text-white hover:bg-brand-red/90`}
             onClick={handleNext}
           >
-            {isLastSlide ? 'Create PIN' : 'Continue'}
+            {isLastSlide ? 'Get Started' : 'Continue'}
           </Button>
         </div>
 

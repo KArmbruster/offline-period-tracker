@@ -30,13 +30,7 @@ export default function UserGuide({ isOpen, onClose }: UserGuideProps) {
                 <strong>100% Offline:</strong> This app runs entirely on your device. No servers, no cloud, no internet connection required after installation.
               </p>
               <p>
-                <strong>Local Storage:</strong> All data is stored in your browser&apos;s local storage (or encrypted SQLite on mobile). Nothing is ever transmitted.
-              </p>
-              <p>
-                <strong>PIN Protection:</strong> Your 4-digit PIN encrypts your data. Without it, your data cannot be accessed.
-              </p>
-              <p>
-                <strong>No Recovery:</strong> If you forget your PIN, there is no way to recover your data. This is intentional for maximum privacy.
+                <strong>Local Storage:</strong> All data is stored in your browser&apos;s local storage (or SQLite on mobile). Nothing is ever transmitted.
               </p>
               <p>
                 <strong>No Analytics:</strong> Zero tracking, zero analytics, zero third-party services.
@@ -105,11 +99,65 @@ export default function UserGuide({ isOpen, onClose }: UserGuideProps) {
                 description="Restore from a previously exported backup file."
                 howTo="Settings > Import Data (replaces all current data)"
               />
-              <FeatureItem
-                title="Change PIN"
-                description="Update your 4-digit PIN."
-                howTo="Settings > Change PIN"
-              />
+            </div>
+          </section>
+
+          {/* How Calculations Work */}
+          <section className="mb-6">
+            <h3 className="mb-3 text-base font-semibold text-gray-900">
+              How Predictions Work
+            </h3>
+            <div className="space-y-3 text-sm text-gray-600">
+              <div>
+                <p className="font-medium text-gray-900">Cycle Length</p>
+                <p>
+                  Your average cycle length is calculated from your last 6 recorded cycles.
+                  A cycle is measured from one period start to the next. If you have fewer
+                  than 2 cycles logged, the app uses 28 days as the default.
+                </p>
+              </div>
+              <div>
+                <p className="font-medium text-gray-900">Period Duration</p>
+                <p>
+                  Calculated as the average number of days from period start to period end
+                  across your logged cycles. If no end dates are recorded, 5 days is used
+                  as the default.
+                </p>
+              </div>
+              <div>
+                <p className="font-medium text-gray-900">Ovulation Date</p>
+                <p>
+                  If you manually log ovulation, that date is used. Otherwise, ovulation
+                  is estimated as 14 days before the next period is expected
+                  (cycle length minus 14 days from period start).
+                </p>
+              </div>
+              <div>
+                <p className="font-medium text-gray-900">Fertile Window</p>
+                <p>
+                  The fertile window spans from 5 days before ovulation to 1 day after
+                  ovulation (7 days total). This is shown as a green ring around the
+                  underlying phase color.
+                </p>
+              </div>
+              <div>
+                <p className="font-medium text-gray-900">Phase Calculations</p>
+                <p>
+                  <strong>- Menstrual:</strong> From period start to period end.<br></br>
+                  <strong>- Follicular:</strong> From end of period to day before ovulation.<br></br>
+                  <strong>- Ovulation:</strong> The estimated or logged ovulation day.<br></br>
+                  <strong>- Luteal:</strong> From day after ovulation until next period.
+                </p>
+              </div>
+              <div>
+                <p className="font-medium text-gray-900">Future Predictions</p>
+                <p>
+                  After logging 2 or more cycles, the app projects phases up to 12 months
+                  into the future. Predictions use your average cycle length and period
+                  duration. Future dates appear slightly transparent to indicate they are
+                  estimates, not recorded data.
+                </p>
+              </div>
             </div>
           </section>
 

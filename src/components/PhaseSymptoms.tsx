@@ -71,6 +71,36 @@ function getSymptomLabel(symptom: string, customTypes: CustomSymptomType[]): str
   return symptom.replace(/_/g, ' ');
 }
 
+// Check if a symptom is a period pain level
+function isPeriodPainSymptom(symptom: string): boolean {
+  return symptom.startsWith('period_pain_');
+}
+
+// Extract pain level number from symptom type
+function getPainLevel(symptom: string): number {
+  const match = symptom.match(/period_pain_(\d+)/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+// Calculate average pain from symptoms
+function calculateAveragePain(
+  symptoms: PhaseSymptomHistory[]
+): number | null {
+  const painSymptoms = symptoms.filter((s) => isPeriodPainSymptom(s.symptom));
+  if (painSymptoms.length === 0) return null;
+
+  let totalPain = 0;
+  let totalOccurrences = 0;
+
+  painSymptoms.forEach(({ symptom, occurrences }) => {
+    const level = getPainLevel(symptom);
+    totalPain += level * occurrences;
+    totalOccurrences += occurrences;
+  });
+
+  return Math.round((totalPain / totalOccurrences) * 10) / 10;
+}
+
 export default function PhaseSymptoms({
   phase,
   symptoms,
@@ -104,27 +134,40 @@ export default function PhaseSymptoms({
             Common symptoms
           </h3>
         </div>
-        {symptoms.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {symptoms.map(({ symptom, occurrences }) => (
-              <div
-                key={symptom}
-                className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1"
-              >
-                <span className="text-xs text-gray-700">
-                  {getSymptomLabel(symptom, customSymptomTypes)}
-                </span>
-                <span className={`text-xs font-medium ${phaseColors.text}`}>
-                  {occurrences}/{cyclesAnalyzed}
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-xs text-gray-500">
-            No symptoms recorded for this phase yet
-          </p>
-        )}
+        {(() => {
+          const nonPainSymptoms = symptoms.filter((s) => !isPeriodPainSymptom(s.symptom));
+          const avgPain = calculateAveragePain(symptoms);
+          const hasSymptoms = nonPainSymptoms.length > 0 || avgPain !== null;
+
+          return hasSymptoms ? (
+            <div className="flex flex-wrap gap-2">
+              {nonPainSymptoms.map(({ symptom, occurrences }) => (
+                <div
+                  key={symptom}
+                  className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1"
+                >
+                  <span className="text-xs text-gray-700">
+                    {getSymptomLabel(symptom, customSymptomTypes)}
+                  </span>
+                  <span className={`text-xs font-medium ${phaseColors.text}`}>
+                    {occurrences}/{cyclesAnalyzed}
+                  </span>
+                </div>
+              ))}
+              {avgPain !== null && (
+                <div className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1">
+                  <span className="text-xs text-gray-700">
+                    Pain (Ø {avgPain.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })})
+                  </span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <p className="text-xs text-gray-500">
+              No symptoms recorded for this phase yet
+            </p>
+          );
+        })()}
       </div>
 
       {/* Next Period Prediction */}

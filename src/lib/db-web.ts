@@ -22,7 +22,7 @@ class WebDatabaseService {
     day_notes: 1,
   };
 
-  async initialize(_passphrase: string): Promise<boolean> {
+  async initialize(): Promise<boolean> {
     try {
       // Load next IDs from existing data
       this.loadNextIds();

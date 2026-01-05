@@ -12,7 +12,7 @@ function isNativePlatform(): boolean {
 
 // Database interface that both implementations satisfy
 export interface DatabaseInterface {
-  initialize(passphrase: string): Promise<boolean>;
+  initialize(): Promise<boolean>;
   close(): Promise<void>;
   getAllCycles(): Promise<Cycle[]>;
   getCycleById(id: number): Promise<Cycle | null>;
@@ -81,7 +81,7 @@ class NativeDatabaseService implements DatabaseInterface {
     return this.sqlite;
   }
 
-  async initialize(passphrase: string): Promise<boolean> {
+  async initialize(): Promise<boolean> {
     try {
       const sqlite = await this.getSQLite();
 
@@ -94,17 +94,14 @@ class NativeDatabaseService implements DatabaseInterface {
       } else {
         this.db = await sqlite.createConnection(
           DB_NAME,
-          true, // encrypted
-          'secret', // mode
+          false, // not encrypted
+          'no-encryption', // mode
           1, // version
           false // readonly
         );
       }
 
       await this.db.open();
-
-      // Set encryption key
-      await this.db.execute(`PRAGMA key = '${passphrase}'`);
 
       // Run migrations
       await this.runMigrations();

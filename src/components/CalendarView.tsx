@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   format,
   startOfMonth,
@@ -82,6 +82,20 @@ const SYMPTOM_CATEGORIES = {
   },
 };
 
+// Period pain levels (1-10 scale)
+const PERIOD_PAIN_LEVELS = [
+  { type: SymptomType.PERIOD_PAIN_1, label: '1' },
+  { type: SymptomType.PERIOD_PAIN_2, label: '2' },
+  { type: SymptomType.PERIOD_PAIN_3, label: '3' },
+  { type: SymptomType.PERIOD_PAIN_4, label: '4' },
+  { type: SymptomType.PERIOD_PAIN_5, label: '5' },
+  { type: SymptomType.PERIOD_PAIN_6, label: '6' },
+  { type: SymptomType.PERIOD_PAIN_7, label: '7' },
+  { type: SymptomType.PERIOD_PAIN_8, label: '8' },
+  { type: SymptomType.PERIOD_PAIN_9, label: '9' },
+  { type: SymptomType.PERIOD_PAIN_10, label: '10' },
+];
+
 // Day type for radio button selection
 type DayType = 'none' | 'period_start' | 'period_end' | 'ovulation';
 
@@ -101,6 +115,46 @@ function isInFertileWindow(
     start: startOfDay(fertileWindow.start),
     end: startOfDay(fertileWindow.end),
   });
+}
+
+// Helper function to check if a predicted date is in the fertile window
+function isInPredictedFertileWindow(
+  date: Date,
+  cycles: Cycle[],
+  cycleLength: number
+): boolean {
+  // Require at least 2 cycles to show predicted fertile window (same as predicted phases)
+  if (cycles.length < 2) return false;
+
+  // Get the most recent cycle
+  const sortedCycles = [...cycles].sort(
+    (a, b) =>
+      parseISO(b.period_start_date).getTime() -
+      parseISO(a.period_start_date).getTime()
+  );
+
+  const lastCycle = sortedCycles[0];
+  const lastPeriodStart = parseISO(lastCycle.period_start_date);
+
+  // Calculate how many days since last period start
+  const daysSinceLastPeriod = Math.floor(
+    (startOfDay(date).getTime() - startOfDay(lastPeriodStart).getTime()) /
+      (1000 * 60 * 60 * 24)
+  );
+
+  if (daysSinceLastPeriod < 0) return false;
+
+  // Calculate position within a projected cycle
+  const dayInCycle = daysSinceLastPeriod % cycleLength;
+
+  // Calculate ovulation day (cycleLength - 14)
+  const ovulationDay = cycleLength - 14;
+
+  // Fertile window: 5 days before ovulation to 1 day after
+  const fertileStart = ovulationDay - 5;
+  const fertileEnd = ovulationDay + 1;
+
+  return dayInCycle >= fertileStart && dayInCycle <= fertileEnd;
 }
 
 // Helper function to get phase for a specific date
@@ -198,6 +252,11 @@ export default function CalendarView() {
   const [noteText, setNoteText] = useState('');
   const [allNotes, setAllNotes] = useState<DayNote[]>([]);
 
+  // Swipe gesture state
+  const touchStartX = useRef<number | null>(null);
+  const touchStartY = useRef<number | null>(null);
+  const SWIPE_THRESHOLD = 50; // minimum distance for a swipe
+
   const loadData = useCallback(async () => {
     try {
       const [allCycles, allSymptoms, allCustomTypes, notes] = await Promise.all([
@@ -263,15 +322,15 @@ export default function CalendarView() {
       const { phase, isPrediction } = getDayPhaseForDate(date, cycles, cycleLength, periodLength);
 
       // For recorded cycles, use actual fertile window calculation
-      // For predictions, derive fertile from the phase
+      // For predictions, calculate fertile window based on predicted cycle position
       let isFertile = false;
 
       if (!isPrediction) {
         // Use actual cycle data for past/present days
         isFertile = isInFertileWindow(date, cycles, cycleLength);
       } else {
-        // For predicted days, derive from phase
-        isFertile = phase === Phase.FERTILE;
+        // For predicted days, calculate fertile window from cycle position
+        isFertile = isInPredictedFertileWindow(date, cycles, cycleLength);
       }
 
       return { phase, isPrediction, isFertile };
@@ -481,6 +540,49 @@ export default function CalendarView() {
     return selectedDateInfo.symptoms.some((s) => s.symptom_type === symptomType);
   };
 
+  // Get the currently selected period pain level (if any)
+  const getSelectedPainLevel = (): string | null => {
+    const painSymptom = selectedDateInfo.symptoms.find((s) =>
+      s.symptom_type.startsWith('period_pain_')
+    );
+    return painSymptom?.symptom_type || null;
+  };
+
+  // Handle period pain level selection (radio button behavior - only one can be selected)
+  const handlePainLevelChange = async (painType: string) => {
+    if (!selectedDate || isFutureDate(selectedDate)) return;
+
+    try {
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const currentPainLevel = getSelectedPainLevel();
+
+      // If clicking the same level, remove it
+      if (currentPainLevel === painType) {
+        const existingSymptom = selectedDateInfo.symptoms.find(
+          (s) => s.symptom_type === painType
+        );
+        if (existingSymptom) {
+          await db.deleteSymptom(existingSymptom.id);
+        }
+      } else {
+        // Remove any existing pain level first
+        if (currentPainLevel) {
+          const existingSymptom = selectedDateInfo.symptoms.find(
+            (s) => s.symptom_type === currentPainLevel
+          );
+          if (existingSymptom) {
+            await db.deleteSymptom(existingSymptom.id);
+          }
+        }
+        // Add the new pain level
+        await db.addSymptom(dateStr, painType);
+      }
+      await loadData();
+    } catch (error) {
+      console.error('Failed to update pain level:', error);
+    }
+  };
+
   // Handle creating a custom symptom
   const handleCreateCustomSymptom = async () => {
     if (!newSymptomName.trim() || !newSymptomCategory) return;
@@ -552,6 +654,36 @@ export default function CalendarView() {
     return findCycleForDate(selectedDate, cycles) !== null;
   }, [selectedDate, cycles]);
 
+  // Swipe handlers for month navigation
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  }, []);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (touchStartX.current === null || touchStartY.current === null) return;
+
+    const touchEndX = e.changedTouches[0].clientX;
+    const touchEndY = e.changedTouches[0].clientY;
+    const deltaX = touchEndX - touchStartX.current;
+    const deltaY = touchEndY - touchStartY.current;
+
+    // Only trigger swipe if horizontal movement is greater than vertical
+    // This prevents accidental swipes when scrolling
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > SWIPE_THRESHOLD) {
+      if (deltaX > 0) {
+        // Swipe right -> previous month
+        setCurrentMonth(subMonths(currentMonth, 1));
+      } else {
+        // Swipe left -> next month
+        setCurrentMonth(addMonths(currentMonth, 1));
+      }
+    }
+
+    touchStartX.current = null;
+    touchStartY.current = null;
+  }, [currentMonth]);
+
   const calendarDays = getCalendarDays();
 
   if (isLoading) {
@@ -596,19 +728,24 @@ export default function CalendarView() {
       </div>
 
       {/* Calendar Grid */}
-      <div className="grid grid-cols-7 gap-1">
+      <div
+        className="grid grid-cols-7 gap-1"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
         {calendarDays.map((day) => {
           const isCurrentMonth = isSameMonth(day, currentMonth);
           const isToday = isSameDay(day, new Date());
           const isFuture = isFutureDate(day);
-          const { phase, isPrediction, isFertile } = isCurrentMonth
-            ? getDayPhaseInfo(day)
-            : { phase: null, isPrediction: false, isFertile: false };
+          // Always calculate phase info for all days (including prev/next month)
+          const { phase, isPrediction, isFertile } = getDayPhaseInfo(day);
+          // Apply phase colors to all days, but mute non-current-month days
+          const baseStyles = getDayStyles(phase, isPrediction, isFertile);
           const dayStyles = isCurrentMonth
-            ? getDayStyles(phase, isPrediction, isFertile)
-            : 'text-gray-300';
+            ? baseStyles
+            : `${baseStyles} opacity-40`;
           const todayRingColor = getTodayRingColor(phase);
-          const dayEntries = isCurrentMonth && !isFuture ? getDayEntries(day) : null;
+          const dayEntries = !isFuture ? getDayEntries(day) : null;
 
           return (
             <button
@@ -616,7 +753,7 @@ export default function CalendarView() {
               onClick={() => handleDayClick(day)}
               disabled={isFuture}
               className={`relative flex h-12 items-center justify-center rounded-lg text-sm font-medium transition-colors ${dayStyles} ${
-                isFuture && isCurrentMonth ? 'cursor-not-allowed opacity-50' : ''
+                isFuture ? 'cursor-not-allowed opacity-50' : ''
               }`}
             >
               {isToday ? (
@@ -794,18 +931,18 @@ export default function CalendarView() {
                 </div>
               </div>
 
-              {/* Flow symptoms */}
+              {/* Period Pain */}
               <div>
                 <h3 className="mb-2 text-sm font-medium text-gray-500">
-                  {SYMPTOM_CATEGORIES.flow.label}
+                  Pain Level
                 </h3>
-                <div className="flex flex-wrap gap-2">
-                  {SYMPTOM_CATEGORIES.flow.symptoms.map(({ type, label }) => (
+                <div className="flex gap-1">
+                  {PERIOD_PAIN_LEVELS.map(({ type, label }) => (
                     <button
                       key={type}
-                      onClick={() => handleToggleSymptom(type)}
-                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
-                        isSymptomSelected(type)
+                      onClick={() => handlePainLevelChange(type)}
+                      className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-colors ${
+                        getSelectedPainLevel() === type
                           ? 'bg-brand-fuchsia text-white'
                           : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
                       }`}
@@ -847,6 +984,28 @@ export default function CalendarView() {
                       }`}
                     >
                       {custom.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Flow symptoms */}
+              <div>
+                <h3 className="mb-2 text-sm font-medium text-gray-500">
+                  {SYMPTOM_CATEGORIES.flow.label}
+                </h3>
+                <div className="flex flex-wrap gap-2">
+                  {SYMPTOM_CATEGORIES.flow.symptoms.map(({ type, label }) => (
+                    <button
+                      key={type}
+                      onClick={() => handleToggleSymptom(type)}
+                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
+                        isSymptomSelected(type)
+                          ? 'bg-brand-fuchsia text-white'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                      }`}
+                    >
+                      {label}
                     </button>
                   ))}
                 </div>

@@ -2,99 +2,40 @@
 
 import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import { db } from '@/lib/db';
-import { isPinSetup, verifyPin, storePinHash, deriveEncryptionKey, clearAllStoredData } from '@/lib/crypto';
 
 interface AppContextType {
-  isUnlocked: boolean;
   isFirstLaunch: boolean;
   isLoading: boolean;
-  unlock: (pin: string) => Promise<boolean>;
-  setupPin: (pin: string) => Promise<boolean>;
-  lock: () => void;
+  completeOnboarding: () => void;
   resetApp: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | null>(null);
 
+const ONBOARDING_COMPLETE_KEY = 'pt_onboarding_complete';
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [isUnlocked, setIsUnlocked] = useState(false);
   const [isFirstLaunch, setIsFirstLaunch] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Check if PIN is setup on mount
+  // Check if onboarding is complete and initialize database on mount
   useEffect(() => {
-    const checkSetup = () => {
-      const pinExists = isPinSetup();
-      setIsFirstLaunch(!pinExists);
+    const init = async () => {
+      const onboardingComplete = localStorage.getItem(ONBOARDING_COMPLETE_KEY) === 'true';
+      setIsFirstLaunch(!onboardingComplete);
+
+      // Initialize database (no passphrase needed)
+      await db.initialize();
+
       setIsLoading(false);
     };
 
-    checkSetup();
+    init();
   }, []);
 
-  // Handle app visibility changes (auto-lock when app goes to background)
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        setIsUnlocked(false);
-        db.close();
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
-
-  const unlock = useCallback(async (pin: string): Promise<boolean> => {
-    try {
-      const isValid = await verifyPin(pin);
-
-      if (!isValid) {
-        return false;
-      }
-
-      const encryptionKey = await deriveEncryptionKey(pin);
-      const dbInitialized = await db.initialize(encryptionKey);
-
-      if (!dbInitialized) {
-        return false;
-      }
-
-      setIsUnlocked(true);
-      return true;
-    } catch (error) {
-      console.error('Unlock failed:', error);
-      return false;
-    }
-  }, []);
-
-  const setupPin = useCallback(async (pin: string): Promise<boolean> => {
-    try {
-      await storePinHash(pin);
-      const encryptionKey = await deriveEncryptionKey(pin);
-      const dbInitialized = await db.initialize(encryptionKey);
-
-      if (!dbInitialized) {
-        clearAllStoredData();
-        return false;
-      }
-
-      setIsFirstLaunch(false);
-      setIsUnlocked(true);
-      return true;
-    } catch (error) {
-      console.error('PIN setup failed:', error);
-      clearAllStoredData();
-      return false;
-    }
-  }, []);
-
-  const lock = useCallback(() => {
-    setIsUnlocked(false);
-    db.close();
+  const completeOnboarding = useCallback(() => {
+    localStorage.setItem(ONBOARDING_COMPLETE_KEY, 'true');
+    setIsFirstLaunch(false);
   }, []);
 
   const resetApp = useCallback(async () => {
@@ -104,21 +45,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         await db.close();
       }
 
-      // Always clear all database data (works even when not initialized)
+      // Clear all database data
       await db.clearAllData();
 
-      // Clear stored PIN hash
-      clearAllStoredData();
+      // Clear onboarding flag
+      localStorage.removeItem(ONBOARDING_COMPLETE_KEY);
 
       // Reset state
-      setIsUnlocked(false);
       setIsFirstLaunch(true);
     } catch (error) {
       console.error('Reset failed:', error);
       // Force clear localStorage anyway
       await db.clearAllData();
-      clearAllStoredData();
-      setIsUnlocked(false);
+      localStorage.removeItem(ONBOARDING_COMPLETE_KEY);
       setIsFirstLaunch(true);
     }
   }, []);
@@ -126,12 +65,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   return (
     <AppContext.Provider
       value={{
-        isUnlocked,
         isFirstLaunch,
         isLoading,
-        unlock,
-        setupPin,
-        lock,
+        completeOnboarding,
         resetApp,
       }}
     >

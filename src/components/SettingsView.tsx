@@ -4,27 +4,13 @@ import { useState, useCallback } from 'react';
 import { format } from 'date-fns';
 import { useApp } from '@/context/AppContext';
 import { db } from '@/lib/db';
-import { storePinHash, verifyPin, validatePinFormat } from '@/lib/crypto';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import {
-  Drawer,
-  DrawerContent,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/components/ui/drawer';
 import UserGuide from '@/components/UserGuide';
 import type { ExportData } from '@/types';
 
 export default function SettingsView() {
-  const { resetApp, lock } = useApp();
-  const [isChangePinOpen, setIsChangePinOpen] = useState(false);
+  const { resetApp } = useApp();
   const [isUserGuideOpen, setIsUserGuideOpen] = useState(false);
-  const [currentPin, setCurrentPin] = useState('');
-  const [newPin, setNewPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [pinError, setPinError] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
 
   const handleExport = useCallback(async () => {
     try {
@@ -94,52 +80,9 @@ export default function SettingsView() {
     input.click();
   }, []);
 
-  const handleChangePin = useCallback(async () => {
-    setPinError('');
-
-    if (!validatePinFormat(currentPin)) {
-      setPinError('Current PIN must be 4 digits');
-      return;
-    }
-
-    if (!validatePinFormat(newPin)) {
-      setPinError('New PIN must be 4 digits');
-      return;
-    }
-
-    if (newPin !== confirmPin) {
-      setPinError('New PINs do not match');
-      return;
-    }
-
-    setIsProcessing(true);
-
-    const isValid = await verifyPin(currentPin);
-    if (!isValid) {
-      setPinError('Current PIN is incorrect');
-      setIsProcessing(false);
-      return;
-    }
-
-    try {
-      await storePinHash(newPin);
-      setIsChangePinOpen(false);
-      setCurrentPin('');
-      setNewPin('');
-      setConfirmPin('');
-      alert('PIN changed successfully! Please log in again.');
-      lock();
-    } catch (error) {
-      console.error('Failed to change PIN:', error);
-      setPinError('Failed to change PIN. Please try again.');
-    }
-
-    setIsProcessing(false);
-  }, [currentPin, newPin, confirmPin, lock]);
-
   const handleReset = useCallback(async () => {
     const confirmed = confirm(
-      'This will delete ALL data including your PIN. This cannot be undone. Are you absolutely sure?'
+      'This will delete ALL data. This cannot be undone. Are you absolutely sure?'
     );
 
     if (!confirmed) return;
@@ -163,13 +106,6 @@ export default function SettingsView() {
           label="User Guide"
           description="Learn how to use the app and how your data is protected"
           onClick={() => setIsUserGuideOpen(true)}
-        />
-
-        {/* Change PIN */}
-        <SettingsButton
-          label="Change PIN"
-          description="Update your 4-digit PIN"
-          onClick={() => setIsChangePinOpen(true)}
         />
 
         {/* Export Data */}
@@ -212,71 +148,6 @@ export default function SettingsView() {
         isOpen={isUserGuideOpen}
         onClose={() => setIsUserGuideOpen(false)}
       />
-
-      {/* Change PIN Drawer */}
-      <Drawer open={isChangePinOpen} onOpenChange={setIsChangePinOpen}>
-        <DrawerContent>
-          <DrawerHeader>
-            <DrawerTitle>Change PIN</DrawerTitle>
-          </DrawerHeader>
-          <div className="space-y-4 p-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Current PIN
-              </label>
-              <Input
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={currentPin}
-                onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="••••"
-                className="h-12 text-center text-xl tracking-widest"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                New PIN
-              </label>
-              <Input
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={newPin}
-                onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="••••"
-                className="h-12 text-center text-xl tracking-widest"
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Confirm New PIN
-              </label>
-              <Input
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={confirmPin}
-                onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ''))}
-                placeholder="••••"
-                className="h-12 text-center text-xl tracking-widest"
-              />
-            </div>
-
-            {pinError && (
-              <p className="text-sm text-red-600">{pinError}</p>
-            )}
-
-            <Button
-              className="h-14 w-full bg-brand-red text-white hover:bg-brand-red/90"
-              onClick={handleChangePin}
-              disabled={isProcessing}
-            >
-              {isProcessing ? 'Changing...' : 'Change PIN'}
-            </Button>
-          </div>
-        </DrawerContent>
-      </Drawer>
     </div>
   );
 }
