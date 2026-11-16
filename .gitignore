@@ -40,6 +40,10 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# Capacitor
-/android
-/ios
+# Capacitor: the native projects are committed (icons, native config).
+# Their own .gitignore files exclude build output and local.properties.
+
+# Signing material must never be committed
+*.jks
+*.keystore
+keystore.properties

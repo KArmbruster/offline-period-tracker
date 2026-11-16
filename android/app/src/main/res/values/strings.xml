@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Period Tracker</string>
+    <string name="title_activity_main">Period Tracker</string>
+    <string name="package_name">com.privacyfirst.periodtracker</string>
+    <string name="custom_url_scheme">com.privacyfirst.periodtracker</string>
+</resources>
