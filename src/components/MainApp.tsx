@@ -57,11 +57,18 @@ function TabButton({ icon, label, isActive, onClick }: TabButtonProps) {
   return (
     <button
       onClick={onClick}
-      className={`flex h-full flex-1 flex-col items-center justify-center gap-1 transition-colors ${
+      aria-current={isActive ? 'page' : undefined}
+      className={`flex h-full flex-1 flex-col items-center justify-center gap-0.5 transition-colors ${
         isActive ? 'text-brand-red' : 'text-gray-500'
       }`}
     >
-      <div className="h-6 w-6">{icon}</div>
+      <div
+        className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors ${
+          isActive ? 'bg-brand-pink/20' : ''
+        }`}
+      >
+        {icon}
+      </div>
       <span className="text-xs font-medium">{label}</span>
     </button>
   );

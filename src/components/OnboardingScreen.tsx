@@ -59,10 +59,11 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
       <div className="w-full max-w-sm">
         {/* App Icon */}
         <div className="mb-14 flex justify-center">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={`${basePath}/icons/icon-192.png`}
             alt="Period Tracker"
-            className="h-24 w-24"
+            className="h-24 w-24 rounded-3xl shadow-sm"
           />
         </div>
 
@@ -97,20 +98,20 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
               <p className="text-gray-600 text-sm text-center mb-4">
                 For the best experience, install this app on your home screen:
               </p>
-              <div className="bg-gray-50 rounded-lg p-4">
+              <div className="bg-gray-50 rounded-2xl p-4">
                 <p className="font-medium text-gray-800 mb-2">Android (Chrome)</p>
                 <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
                   <li>Tap the menu (3 dots) in your browser</li>
-                  <li>Select "Install app" or "Add to Home screen"</li>
-                  <li>Tap "Install" to confirm</li>
+                  <li>Select “Install app” or “Add to Home screen”</li>
+                  <li>Tap “Install” to confirm</li>
                 </ol>
               </div>
-              <div className="bg-gray-50 rounded-lg p-4">
+              <div className="bg-gray-50 rounded-2xl p-4">
                 <p className="font-medium text-gray-800 mb-2">iPhone/iPad (Safari)</p>
                 <ol className="text-sm text-gray-600 space-y-1 list-decimal list-inside">
                   <li>Tap the Share button (square with arrow)</li>
-                  <li>Scroll down and tap "Add to Home Screen"</li>
-                  <li>Tap "Add" to confirm</li>
+                  <li>Scroll down and tap “Add to Home Screen”</li>
+                  <li>Tap “Add” to confirm</li>
                 </ol>
               </div>
               <p className="text-xs text-gray-500 text-center mt-2">
@@ -143,7 +144,7 @@ export default function OnboardingScreen({ onComplete }: OnboardingScreenProps) 
         {!isLastSlide && (
           <div className="mt-4 text-center">
             <button
-              className="text-sm text-gray-400 underline"
+              className="h-11 px-3 text-sm text-gray-500 underline"
               onClick={onComplete}
             >
               Skip introduction

@@ -35,31 +35,64 @@ function isPlausibleCycleLength(length: number, typicalLength: number): boolean 
   return length > 0 && length < MAX_VALID_CYCLE_LENGTH && length <= typicalLength * OUTLIER_FACTOR;
 }
 
+export interface CycleHistoryEntry {
+  cycle: Cycle;
+  /** Days from this period start to the next one. Null for the current cycle. */
+  length: number | null;
+  /** Logged period duration, or the 5-day default if no end was logged */
+  periodLength: number;
+  /** False for gaps that are ignored in averages (a period that was not logged) */
+  counted: boolean;
+}
+
 /**
- * Lengths of the most recent cycles (start to next start), newest first.
- * Gaps that are far longer than the others are dropped: they almost always
- * mean a period was not logged, and would otherwise skew every prediction.
+ * The current cycle plus the most recent completed ones, newest first.
+ * Gaps that are far longer than the others are flagged as not counted: they
+ * almost always mean a period was not logged, and would skew every prediction.
+ */
+export function getCycleHistory(cycles: Cycle[], maxCycles: number = MAX_CYCLES): CycleHistoryEntry[] {
+  const sorted = sortAscending(cycles);
+  const entries: CycleHistoryEntry[] = [];
+  let valid = 0;
+
+  for (let i = sorted.length - 1; i >= 0 && valid < maxCycles; i--) {
+    const cycle = sorted[i];
+    const periodLength = calculatePeriodDuration(cycle);
+
+    if (i === sorted.length - 1) {
+      entries.push({ cycle, length: null, periodLength, counted: false });
+      continue;
+    }
+
+    const length = differenceInCalendarDays(
+      parseISO(sorted[i + 1].period_start_date),
+      parseISO(cycle.period_start_date)
+    );
+    const counted = length > 0 && length < MAX_VALID_CYCLE_LENGTH;
+    if (counted) valid++;
+    entries.push({ cycle, length, periodLength, counted });
+  }
+
+  const lengths = entries.filter((e) => e.counted).map((e) => e.length as number);
+  if (lengths.length >= 3) {
+    const typical = median(lengths);
+    entries.forEach((e) => {
+      if (e.counted && (e.length as number) > typical * OUTLIER_FACTOR) {
+        e.counted = false;
+      }
+    });
+  }
+
+  return entries;
+}
+
+/**
+ * Lengths of the most recent cycles that count towards the average, newest first
  */
 export function getRecentCycleLengths(cycles: Cycle[], maxCycles: number = MAX_CYCLES): number[] {
-  const sorted = sortAscending(cycles);
-  const lengths: number[] = [];
-
-  for (let i = sorted.length - 1; i > 0 && lengths.length < maxCycles; i--) {
-    const length = differenceInCalendarDays(
-      parseISO(sorted[i].period_start_date),
-      parseISO(sorted[i - 1].period_start_date)
-    );
-    if (length > 0 && length < MAX_VALID_CYCLE_LENGTH) {
-      lengths.push(length);
-    }
-  }
-
-  if (lengths.length < 3) {
-    return lengths;
-  }
-
-  const typical = median(lengths);
-  return lengths.filter((length) => length <= typical * OUTLIER_FACTOR);
+  return getCycleHistory(cycles, maxCycles)
+    .filter((e) => e.counted)
+    .map((e) => e.length as number);
 }
 
 /**
@@ -165,16 +198,14 @@ export function findCycleForDate(date: Date, cycles: Cycle[]): Cycle | null {
  */
 export function getDaysUntilNextPeriod(
   cycles: Cycle[],
-  cycleLength: number
+  now: Date = new Date()
 ): { daysUntil: number; predictedDate: string; isOverdue: boolean } | null {
-  if (cycles.length === 0) {
+  const nextPeriod = createCycleModel(cycles, now).nextPeriodStart;
+  if (!nextPeriod) {
     return null;
   }
 
-  const sorted = sortAscending(cycles);
-  const lastStart = parseISO(sorted[sorted.length - 1].period_start_date);
-  const nextPeriod = addDays(lastStart, cycleLength);
-  const daysUntil = differenceInCalendarDays(nextPeriod, startOfDay(new Date()));
+  const daysUntil = differenceInCalendarDays(nextPeriod, startOfDay(now));
 
   return {
     daysUntil,
@@ -195,6 +226,8 @@ export interface DayInfo {
 export interface CycleModel {
   cycleLength: number;
   periodLength: number;
+  /** When the next period is expected. In the past if it is late. Null without data. */
+  nextPeriodStart: Date | null;
   getDayInfo(date: Date): DayInfo;
 }
 
@@ -246,7 +279,18 @@ export function createCycleModel(cycles: Cycle[], now: Date = new Date()): Cycle
   const starts = sorted.map((c) => parseISO(c.period_start_date));
 
   const lastStart = starts.length > 0 ? starts[starts.length - 1] : null;
-  const expectedNextStart = lastStart ? addDays(lastStart, cycleLength) : null;
+
+  // Expected length of the current cycle. A marked ovulation day moves the
+  // expected period, because the luteal phase after it is the stable part.
+  let currentLength = cycleLength;
+  const markedOvulation = sorted.length > 0 ? sorted[sorted.length - 1].ovulation_date : null;
+  if (lastStart && markedOvulation) {
+    const ovulationDay = differenceInCalendarDays(parseISO(markedOvulation), lastStart);
+    if (ovulationDay >= 0 && ovulationDay < MAX_VALID_CYCLE_LENGTH) {
+      currentLength = ovulationDay + LUTEAL_LENGTH + 1;
+    }
+  }
+  const expectedNextStart = lastStart ? addDays(lastStart, currentLength) : null;
   // An unlogged period never appears in the past: if it is due or late,
   // the prediction slides forward and starts tomorrow at the earliest.
   const tomorrow = addDays(today, 1);
@@ -270,12 +314,15 @@ export function createCycleModel(cycles: Cycle[], now: Date = new Date()): Cycle
         // Past the end of a normal cycle inside an implausible gap: unknown
         return NO_INFO;
       }
-    } else if (dayInCycle >= cycleLength) {
-      // Period is due or late and not logged yet: still luteal, for up to
-      // one more cycle length. After that the data is too stale to say.
-      return dayInCycle < cycleLength * 2
-        ? { phase: Phase.LUTEAL, isPrediction, isFertile: false }
-        : NO_INFO;
+    } else {
+      length = currentLength;
+      if (dayInCycle >= currentLength) {
+        // Period is due or late and not logged yet: still luteal, for up to
+        // one more cycle length. After that the data is too stale to say.
+        return dayInCycle < currentLength + cycleLength
+          ? { phase: Phase.LUTEAL, isPrediction, isFertile: false }
+          : NO_INFO;
+      }
     }
 
     const ovulationDay = cycle.ovulation_date
@@ -326,7 +373,7 @@ export function createCycleModel(cycles: Cycle[], now: Date = new Date()): Cycle
     return NO_INFO;
   }
 
-  return { cycleLength, periodLength, getDayInfo };
+  return { cycleLength, periodLength, nextPeriodStart: expectedNextStart, getDayInfo };
 }
 
 export interface PhaseSymptomHistory {

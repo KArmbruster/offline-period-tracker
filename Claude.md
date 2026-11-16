@@ -15,7 +15,7 @@ A 100% local, offline menstrual tracking application with zero data exfiltration
 1. **NO Network Requests** - No fetch, axios, XMLHttpRequest, or 3rd party SDKs requiring internet
 2. **NO Analytics/Telemetry** - Strictly forbidden
 3. **Local Storage Only** - All data in encrypted local SQLite (native) or localStorage (web)
-4. **Privacy First** - No login, no accounts, PIN-derived encryption keys
+4. **Privacy First** - No login, no accounts, no PIN lock (removed)
 5. **Error Handling** - No stack traces in UI, console logging only
 
 ## Color Scheme
@@ -53,38 +53,28 @@ src/
 │   ├── CalendarView.tsx     # Main calendar with phase display
 │   ├── CycleStatusCard.tsx  # Cycle day, phase and next period, above the calendar
 │   ├── InsightsView.tsx     # Statistics and symptom history
-│   ├── SettingsView.tsx     # PIN change, export/import, reset
+│   ├── SettingsView.tsx     # User guide, export/import, reset
 │   ├── MainApp.tsx          # Tab navigation container
 │   ├── OnboardingScreen.tsx # First-launch introduction slides
-│   ├── PinScreen.tsx        # PIN entry for unlock/setup
 │   ├── PhaseSymptoms.tsx    # Common symptoms for today's phase
 │   ├── UserGuide.tsx        # In-app user guide with privacy info
 │   └── ServiceWorkerRegistration.tsx # PWA service worker
 ├── context/
-│   └── AppContext.tsx       # Global app state (unlock, first launch)
+│   └── AppContext.tsx       # Global app state (first launch)
 ├── lib/
 │   ├── db.ts                # Database interface + SQLite implementation
 │   ├── db-web.ts            # localStorage implementation for web/PWA
 │   ├── cycle-logic.ts       # Pure functions for phase calculations
-│   ├── crypto.ts            # PIN-based key derivation and verification
+│   ├── symptom-utils.ts     # Symptom labels and pain helpers
 │   └── utils.ts             # Utility functions (cn for classnames)
 └── types.ts                 # TypeScript interfaces and enums
 ```
 
-## Security
+## First Launch Flow
+1. Onboarding screens with app introduction and install instructions
+2. Main calendar view with empty state message
 
-### PIN Protection
-- **Format**: 4 digits only
-- **Encryption**: SQLCipher with key derived from PIN (native) / localStorage (web)
-- **Auto-lock**: App locks immediately when put in background
-- **No Recovery**: Forgotten PIN = data lost forever
-- **Reset Option**: User can reset app (deletes all data) to start fresh
-
-### First Launch Flow
-1. Onboarding screen with app introduction
-2. Mandatory 4-digit PIN setup
-3. PIN confirmation
-4. Main calendar view with empty state message
+There is no PIN lock or app lock; it was removed. `crypto.ts` and the PIN screens no longer exist.
 
 ## Database Schema
 
@@ -176,6 +166,7 @@ All phase calculations live in `createCycleModel()` in `cycle-logic.ts`. The cal
 1. **Menstrual**: `period_start` to `period_end` (default 5 days if end unknown, max 14 days can be logged)
 2. **Ovulation**: User-marked date (stored in `cycles.ovulation_date`) OR estimated as cycle day `CycleLength - 14` (day 14 of a 28-day cycle)
    - Completed cycles use their own real length; the current cycle uses the average
+   - A user-marked ovulation day in the current cycle moves the expected next period to 15 days after it
 3. **Fertile Window**: `O_day - 5` to `O_day + 1` (displayed as green ring overlay on underlying phase)
 4. **Follicular**: End of Menstrual to day before Ovulation
 5. **Luteal**: Day after Ovulation to next `period_start`
@@ -243,25 +234,26 @@ Below the legend: historical symptoms for today's current phase from last 6 cycl
 
 ## Insights View
 
+Based on the last 6 cycles (gaps from unlogged periods are excluded, see Cycle Logic).
+
 ### Statistics Displayed
-Based on last 6 cycles:
-- **Cycle Length**: Average, Shortest, Longest (days)
-- **Period Duration**: Average, Shortest, Longest (days)
-- **Days Until Ovulation**: Average, Shortest, Longest (days)
-- **History**: Total periods tracked
+- **Cycle Length** and **Period Duration**: average, with shortest-longest range
+- Neutral note when recent cycles fall outside 21-35 days or vary by more than 7 days
+- **Cycle history**: one bar per cycle (current cycle first) showing its length and the period days; excluded gaps are marked "not counted"
+- **Periods tracked**: total count
 
 ### Common Symptoms by Phase
 For each phase (Menstrual, Follicular, Ovulation, Luteal):
 - Shows ALL symptoms recorded during that phase
-- Displays occurrence count as "X/6": the number of the last 6 cycles in which the symptom was logged in that phase (several days in one cycle count once)
+- Displays "X of N cycles": the number of the last 6 cycles in which the symptom was logged in that phase (several days in one cycle count once)
 - Most common symptoms displayed first
+- Average pain level per phase, shown as a ten-step bar (`PainBar.tsx`)
 - Empty state message if no symptoms recorded
 
 ## Settings View
 
 ### Options
 - User Guide (in-app help with privacy info)
-- Change PIN
 - Export Data (JSON backup file)
 - Import Data (destructive restore)
 - Reset App (delete all data)
@@ -273,8 +265,7 @@ Accessible from Settings > User Guide. Contains:
 ### Privacy Information
 - 100% Offline operation (no servers, no cloud)
 - Local storage only (browser localStorage or encrypted SQLite)
-- PIN protection encrypts data
-- No recovery mechanism (intentional for privacy)
+- No recovery mechanism: regular exports are the only backup
 - Zero analytics or tracking
 
 ### Feature Documentation
@@ -285,7 +276,6 @@ Accessible from Settings > User Guide. Contains:
 - Cycle predictions
 - Insights and statistics
 - Data export/import
-- PIN management
 
 ### Visual Guides
 - Calendar color legend (phase colors)
@@ -315,13 +305,14 @@ Accessible from Settings > User Guide. Contains:
 2. Warning: "This will delete all existing data"
 3. User confirms
 4. Select JSON file
-5. Validate version
+5. Validate version and file shape (nothing is wiped if the file is not a backup)
 6. Wipe database
 7. Restore from JSON
 
 ## UI Guidelines
 - **Mobile First**: Touch targets >= 44px (`h-12` or `h-14`)
 - **Bottom Sheets**: Use Drawers instead of centered Modals for data entry
+- **No browser dialogs**: Never use `alert()` or `confirm()`. Use `ConfirmSheet.tsx` for confirmations and notices; inside the day sheet, confirm inline (drawers must not be nested)
 - **Font Size**: >= 16px for inputs (prevents iOS auto-zoom)
 - **Theme**: Single color theme (Red/Pink/White/Fuchsia), calm aesthetic
 - **Language**: English only
@@ -334,6 +325,7 @@ Accessible from Settings > User Guide. Contains:
 ```bash
 npm run dev              # Start development server
 npm run build            # Build web assets (static export)
+npm test                 # Run the cycle logic tests (Vitest)
 npx cap sync             # Copy build to native platforms
 npx cap open ios         # Open Xcode
 npx cap open android     # Open Android Studio
@@ -355,7 +347,6 @@ npx cap run android      # Run on Android device/emulator
 ## Current Status
 - [x] Project setup and scaffolding
 - [x] Database layer (SQLite native + localStorage web)
-- [x] PIN setup and lock screen
 - [x] Core cycle logic with phase calculations
 - [x] Calendar view with phase colors
 - [x] Period start/end/ovulation logging

@@ -164,6 +164,9 @@ export default function CalendarView() {
   const [noteText, setNoteText] = useState('');
   const [allNotes, setAllNotes] = useState<DayNote[]>([]);
 
+  // Day type waiting for the user to confirm removing a period start
+  const [pendingDayType, setPendingDayType] = useState<DayType | null>(null);
+
   // Pain slider: value while dragging, saved when the thumb is released
   const [painDraft, setPainDraft] = useState<number | null>(null);
   const painDraftRef = useRef<number | null>(null);
@@ -196,8 +199,20 @@ export default function CalendarView() {
     loadData();
   }, [loadData]);
 
-  const cycleModel = useMemo(() => createCycleModel(cycles), [cycles]);
-  const cycleLength = cycleModel.cycleLength;
+  // Today's date as a string, refreshed when the app comes back to the
+  // foreground so nothing stays on yesterday after midnight
+  const [todayKey, setTodayKey] = useState(() => format(new Date(), 'yyyy-MM-dd'));
+  useEffect(() => {
+    const refresh = () => setTodayKey(format(new Date(), 'yyyy-MM-dd'));
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
+  }, []);
+
+  const cycleModel = useMemo(() => createCycleModel(cycles, parseISO(todayKey)), [cycles, todayKey]);
 
   // Check if a date is in the future (after today)
   const isFutureDate = useCallback((date: Date): boolean => {
@@ -206,25 +221,26 @@ export default function CalendarView() {
   }, []);
 
   // Where today sits in the cycle
-  const todayInfo = useMemo(() => cycleModel.getDayInfo(new Date()), [cycleModel]);
+  const todayInfo = useMemo(() => cycleModel.getDayInfo(parseISO(todayKey)), [cycleModel, todayKey]);
   const todayPhase = todayInfo.phase;
 
   const cycleDay = useMemo(() => {
-    const now = new Date();
+    const now = parseISO(todayKey);
     const cycle = findCycleForDate(now, cycles);
     return cycle
       ? differenceInCalendarDays(now, parseISO(cycle.period_start_date)) + 1
       : null;
-  }, [cycles]);
+  }, [cycles, todayKey]);
 
   const phaseSymptoms = useMemo(() => {
     if (!todayPhase) return [];
     return getSymptomsForPhaseHistory(todayPhase, cycles, symptoms, 6);
   }, [todayPhase, cycles, symptoms]);
 
-  const nextPeriodInfo = useMemo(() => {
-    return getDaysUntilNextPeriod(cycles, cycleLength);
-  }, [cycles, cycleLength]);
+  const nextPeriodInfo = useMemo(
+    () => getDaysUntilNextPeriod(cycles, parseISO(todayKey)),
+    [cycles, todayKey]
+  );
 
   const cyclesAnalyzed = Math.min(cycles.length, 6);
 
@@ -244,6 +260,7 @@ export default function CalendarView() {
 
     setSelectedDate(date);
     setIsDrawerOpen(true);
+    setPendingDayType(null);
 
     // Reset custom symptom creation state
     setIsCreatingCustomSymptom(false);
@@ -290,7 +307,7 @@ export default function CalendarView() {
   };
 
   // Handle day type change (radio button behavior)
-  const handleDayTypeChange = async (newType: DayType) => {
+  const handleDayTypeChange = async (newType: DayType, confirmed = false) => {
     if (!selectedDate) return;
 
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -305,12 +322,9 @@ export default function CalendarView() {
       if (currentType === 'period_start') {
         const cycle = working.find((c) => c.period_start_date === dateStr);
         if (cycle) {
-          if (
-            (cycle.period_end_date || cycle.ovulation_date) &&
-            !confirm(
-              'Removing this period start also removes the period end and ovulation day logged for this cycle. Continue?'
-            )
-          ) {
+          // Removing the start deletes the whole cycle: ask first if that loses data
+          if ((cycle.period_end_date || cycle.ovulation_date) && !confirmed) {
+            setPendingDayType(newType);
             return;
           }
           await db.deleteCycle(cycle.id);
@@ -587,7 +601,7 @@ export default function CalendarView() {
 
   const calendarDays = getCalendarDays();
   const dayInfos = calendarDays.map((day) => cycleModel.getDayInfo(day));
-  const today = new Date();
+  const today = parseISO(todayKey);
   const isViewingToday = isSameMonth(currentMonth, today);
 
   if (isLoading) {
@@ -753,6 +767,32 @@ export default function CalendarView() {
           <div className="space-y-5 overflow-y-auto px-4 pb-8">
             {/* Period start / end / ovulation */}
             <SheetSection title="Cycle">
+              {pendingDayType !== null ? (
+                <div className="rounded-xl border border-red-200 bg-red-50 p-3" role="alertdialog" aria-label="Remove period start">
+                  <p className="font-medium text-gray-900">Remove this period start?</p>
+                  <p className="mt-1 text-sm text-gray-600">
+                    The period end and ovulation day logged for this cycle will be removed too.
+                  </p>
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setPendingDayType(null)}
+                      className="h-11 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-700"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => {
+                        const type = pendingDayType;
+                        setPendingDayType(null);
+                        handleDayTypeChange(type, true);
+                      }}
+                      className="h-11 rounded-xl bg-red-600 text-sm font-semibold text-white"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ) : (
               <div className="grid grid-cols-3 gap-2">
                 <DayTypeButton
                   icon={<Droplet className="h-5 w-5" />}
@@ -778,6 +818,7 @@ export default function CalendarView() {
                   onClick={() => toggleDayType('ovulation')}
                 />
               </div>
+              )}
             </SheetSection>
 
             {/* Flow: one choice */}
@@ -820,6 +861,7 @@ export default function CalendarView() {
                 onKeyUp={commitPainLevel}
                 onBlur={commitPainLevel}
                 aria-label="Pain level from 0 to 10"
+                data-vaul-no-drag
                 className="h-11 w-full accent-brand-red"
               />
               <div className="-mt-1 flex justify-between text-xs text-gray-400">

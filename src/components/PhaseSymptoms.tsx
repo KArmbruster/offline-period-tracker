@@ -2,6 +2,7 @@
 
 import type { PhaseSymptomHistory } from '@/lib/cycle-logic';
 import { getSymptomLabel, isPeriodPainSymptom, calculateAveragePain } from '@/lib/symptom-utils';
+import PainBar from '@/components/PainBar';
 import type { CustomSymptomType } from '@/types';
 import { PhaseType } from '@/types';
 
@@ -44,7 +45,7 @@ export default function PhaseSymptoms({
   return (
     <div className="mt-4 space-y-3">
       {/* Common Symptoms for Phase */}
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
+      <div className="rounded-2xl border border-gray-200 bg-white p-4">
         <div className="mb-2 flex items-center gap-2">
           <div className={`h-3 w-3 rounded-full ${phaseColors.bg}`} />
           <h3 className="text-sm font-medium text-gray-900">
@@ -57,27 +58,25 @@ export default function PhaseSymptoms({
           const hasSymptoms = nonPainSymptoms.length > 0 || avgPain !== null;
 
           return hasSymptoms ? (
-            <div className="flex flex-wrap gap-2">
-              {nonPainSymptoms.map(({ symptom, occurrences }) => (
-                <div
-                  key={symptom}
-                  className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1"
-                >
-                  <span className="text-xs text-gray-700">
-                    {getSymptomLabel(symptom, customSymptomTypes)}
-                  </span>
-                  <span className={`text-xs font-medium ${phaseColors.text}`}>
-                    {occurrences}/{cyclesAnalyzed}
-                  </span>
-                </div>
-              ))}
-              {avgPain !== null && (
-                <div className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1">
-                  <span className="text-xs text-gray-700">
-                    Pain (Ø {avgPain.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })})
-                  </span>
+            <div className="space-y-3">
+              {nonPainSymptoms.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {nonPainSymptoms.map(({ symptom, occurrences }) => (
+                    <div
+                      key={symptom}
+                      className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1"
+                    >
+                      <span className="text-xs text-gray-700">
+                        {getSymptomLabel(symptom, customSymptomTypes)}
+                      </span>
+                      <span className={`text-xs font-medium ${phaseColors.text}`}>
+                        {occurrences}/{cyclesAnalyzed}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               )}
+              {avgPain !== null && <PainBar average={avgPain} compact />}
             </div>
           ) : (
             <p className="text-xs text-gray-500">
