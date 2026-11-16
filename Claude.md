@@ -217,18 +217,19 @@ All phase calculations live in `createCycleModel()` in `cycle-logic.ts`. The cal
 - Small dot on days with user entries (period start/end, ovulation, symptoms, notes)
 
 ### Day Drawer
-Tap any non-future date to open bottom drawer with:
-- **Day Type Selection** (radio buttons):
-  - None
-  - Period Start
-  - Period End (only if within a cycle)
+Tap any non-future date to open the bottom sheet. Header shows the date plus "Today · Cycle day N · Phase".
+- **Cycle** (three toggle buttons, tap the active one again to clear it):
+  - Period start (asks for confirmation before removing a start that has an end or ovulation day)
+  - Period end (only within 14 days of the period start)
   - Ovulation (only if within a cycle)
-- **Symptoms** (toggleable buttons):
+- **Flow**: segmented control, one choice per day (Spotting, Light, Medium, Heavy)
+- **Pain**: slider from None to 10, saved when released (stored as `period_pain_N`)
+- **Symptoms** (toggleable chips, 44px tall):
   - Physical symptoms (including custom)
-  - Flow indicators
   - Mood symptoms (including custom)
   - "Add custom symptom" option
 - **Notes**: Free-form text area for day notes
+- Icons come from `lucide-react`; no emojis
 
 ### Empty State
 When no data exists, show message:

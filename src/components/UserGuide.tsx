@@ -55,22 +55,22 @@ export default function UserGuide({ isOpen, onClose }: UserGuideProps) {
               <InfoCard
                 title="Log Period Start"
                 description="Mark when your period begins. This creates a new cycle."
-                howTo="Tap a date, then select the red 'Start' button."
+                howTo="Tap a date, then tap 'Period start'. Tap it again to remove it."
               />
               <InfoCard
                 title="Log Period End"
                 description="Mark the last day of your period."
-                howTo="Tap a date within a cycle, then select the green 'End' button."
+                howTo="Tap a date within 14 days of the period start, then tap 'Period end'."
               />
               <InfoCard
                 title="Log Ovulation"
                 description="Record your actual ovulation date if you track it."
-                howTo="Tap a date within a cycle, then select the 'Ovulation' button."
+                howTo="Tap a date within a cycle, then tap 'Ovulation'. Tap it again to remove it."
               />
               <InfoCard
                 title="Track Symptoms"
-                description="Log physical symptoms, flow intensity, and mood for any day."
-                howTo="Tap a date to open the drawer, then tap symptoms to toggle them."
+                description="Log flow, pain level, physical symptoms, and mood for any day."
+                howTo="Tap a date, then tap symptoms to toggle them. Flow is one choice per day; pain is a slider from none to 10."
               />
               <InfoCard
                 title="Custom Symptoms"

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { ChartColumn } from 'lucide-react';
 import { db } from '@/lib/db';
 import {
   getCycleLengthStats,
@@ -114,7 +115,7 @@ export default function InsightsView() {
   if (cycles.length === 0) {
     return (
       <div className="flex h-full flex-col items-center justify-center p-6 text-center">
-        <div className="mb-4 text-6xl">📊</div>
+        <ChartColumn className="mb-4 h-14 w-14 text-brand-pink" strokeWidth={1.5} aria-hidden="true" />
         <h2 className="mb-2 text-xl font-semibold text-gray-900">
           No Data Yet
         </h2>

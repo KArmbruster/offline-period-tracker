@@ -17,6 +17,7 @@ import {
   startOfDay,
   differenceInCalendarDays,
 } from 'date-fns';
+import { Droplet, DropletOff, Egg } from 'lucide-react';
 import { db } from '@/lib/db';
 import {
   createCycleModel,
@@ -37,6 +38,7 @@ import {
 } from '@/components/ui/drawer';
 import PhaseSymptoms from '@/components/PhaseSymptoms';
 import CycleStatusCard from '@/components/CycleStatusCard';
+import { getPainLevel } from '@/lib/symptom-utils';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -79,19 +81,21 @@ const SYMPTOM_CATEGORIES = {
   },
 };
 
-// Period pain levels (1-10 scale)
-const PERIOD_PAIN_LEVELS = [
-  { type: SymptomType.PERIOD_PAIN_1, label: '1' },
-  { type: SymptomType.PERIOD_PAIN_2, label: '2' },
-  { type: SymptomType.PERIOD_PAIN_3, label: '3' },
-  { type: SymptomType.PERIOD_PAIN_4, label: '4' },
-  { type: SymptomType.PERIOD_PAIN_5, label: '5' },
-  { type: SymptomType.PERIOD_PAIN_6, label: '6' },
-  { type: SymptomType.PERIOD_PAIN_7, label: '7' },
-  { type: SymptomType.PERIOD_PAIN_8, label: '8' },
-  { type: SymptomType.PERIOD_PAIN_9, label: '9' },
-  { type: SymptomType.PERIOD_PAIN_10, label: '10' },
+// Flow options in the order shown in the day sheet (only one per day)
+const FLOW_OPTIONS = [
+  { type: SymptomType.SPOTTING, label: 'Spotting' },
+  { type: SymptomType.FLOW_LIGHT, label: 'Light' },
+  { type: SymptomType.FLOW_MEDIUM, label: 'Medium' },
+  { type: SymptomType.FLOW_HEAVY, label: 'Heavy' },
 ];
+const FLOW_TYPES: string[] = FLOW_OPTIONS.map((o) => o.type);
+
+const PHASE_LABELS: Record<string, string> = {
+  [Phase.MENSTRUAL]: 'Menstrual',
+  [Phase.FOLLICULAR]: 'Follicular',
+  [Phase.OVULATION]: 'Ovulation',
+  [Phase.LUTEAL]: 'Luteal',
+};
 
 // Day type for radio button selection
 type DayType = 'none' | 'period_start' | 'period_end' | 'ovulation';
@@ -159,6 +163,10 @@ export default function CalendarView() {
   const [dayNote, setDayNote] = useState<DayNote | null>(null);
   const [noteText, setNoteText] = useState('');
   const [allNotes, setAllNotes] = useState<DayNote[]>([]);
+
+  // Pain slider: value while dragging, saved when the thumb is released
+  const [painDraft, setPainDraft] = useState<number | null>(null);
+  const painDraftRef = useRef<number | null>(null);
 
   // Swipe gesture state
   const touchStartX = useRef<number | null>(null);
@@ -399,48 +407,88 @@ export default function CalendarView() {
     return selectedDateInfo.symptoms.some((s) => s.symptom_type === symptomType);
   };
 
-  // Get the currently selected period pain level (if any)
-  const getSelectedPainLevel = (): string | null => {
-    const painSymptom = selectedDateInfo.symptoms.find((s) =>
-      s.symptom_type.startsWith('period_pain_')
-    );
-    return painSymptom?.symptom_type || null;
+  // Pain level logged for the selected date (0 = none)
+  const selectedPainLevel = selectedDateInfo.symptoms.reduce(
+    (level, s) => (s.symptom_type.startsWith('period_pain_') ? getPainLevel(s.symptom_type) : level),
+    0
+  );
+
+  const handlePainDrag = (level: number) => {
+    painDraftRef.current = level;
+    setPainDraft(level);
   };
 
-  // Handle period pain level selection (radio button behavior - only one can be selected)
-  const handlePainLevelChange = async (painType: string) => {
+  // Save the pain level once the slider is released (only one level per day)
+  const commitPainLevel = async () => {
+    const level = painDraftRef.current;
+    if (level === null || !selectedDate || isFutureDate(selectedDate)) return;
+    painDraftRef.current = null;
+
+    try {
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const target = level > 0 ? `period_pain_${level}` : null;
+      const existing = selectedDateInfo.symptoms.filter((s) =>
+        s.symptom_type.startsWith('period_pain_')
+      );
+      const unchanged =
+        (existing.length === 0 && !target) ||
+        (existing.length === 1 && existing[0].symptom_type === target);
+
+      if (!unchanged) {
+        for (const symptom of existing) {
+          await db.deleteSymptom(symptom.id);
+        }
+        if (target) {
+          await db.addSymptom(dateStr, target);
+        }
+        await loadData();
+      }
+    } catch (error) {
+      console.error('Failed to update pain level:', error);
+    } finally {
+      setPainDraft(null);
+    }
+  };
+
+  // Flow is single choice: picking one replaces the other, tapping it again clears it
+  const handleFlowChange = async (flowType: string) => {
     if (!selectedDate || isFutureDate(selectedDate)) return;
 
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
-      const currentPainLevel = getSelectedPainLevel();
+      const existing = selectedDateInfo.symptoms.filter((s) => FLOW_TYPES.includes(s.symptom_type));
+      const wasSelected = existing.some((s) => s.symptom_type === flowType);
 
-      // If clicking the same level, remove it
-      if (currentPainLevel === painType) {
-        const existingSymptom = selectedDateInfo.symptoms.find(
-          (s) => s.symptom_type === painType
-        );
-        if (existingSymptom) {
-          await db.deleteSymptom(existingSymptom.id);
-        }
-      } else {
-        // Remove any existing pain level first
-        if (currentPainLevel) {
-          const existingSymptom = selectedDateInfo.symptoms.find(
-            (s) => s.symptom_type === currentPainLevel
-          );
-          if (existingSymptom) {
-            await db.deleteSymptom(existingSymptom.id);
-          }
-        }
-        // Add the new pain level
-        await db.addSymptom(dateStr, painType);
+      for (const symptom of existing) {
+        await db.deleteSymptom(symptom.id);
+      }
+      if (!wasSelected) {
+        await db.addSymptom(dateStr, flowType);
       }
       await loadData();
     } catch (error) {
-      console.error('Failed to update pain level:', error);
+      console.error('Failed to update flow:', error);
     }
   };
+
+  // Tapping the active day type again clears it
+  const toggleDayType = (type: DayType) =>
+    handleDayTypeChange(selectedDayType === type ? 'none' : type);
+
+  // Subtitle of the day sheet: where the selected date sits in the cycle
+  const selectedDateSummary = (() => {
+    if (!selectedDate) return '';
+    const info = cycleModel.getDayInfo(selectedDate);
+    const cycle = findCycleForDate(selectedDate, cycles);
+    const parts: string[] = [];
+    if (isSameDay(selectedDate, new Date())) parts.push('Today');
+    if (info.phase && cycle) {
+      const day = differenceInCalendarDays(selectedDate, parseISO(cycle.period_start_date)) + 1;
+      parts.push(`Cycle day ${day}`);
+      parts.push(PHASE_LABELS[info.phase] ?? '');
+    }
+    return parts.filter(Boolean).join(' · ');
+  })();
 
   // Handle creating a custom symptom
   const handleCreateCustomSymptom = async () => {
@@ -693,274 +741,287 @@ export default function CalendarView() {
         }
         setIsDrawerOpen(open);
       }}>
-        <DrawerContent className="max-h-[85vh]">
-          <DrawerHeader>
-            <DrawerTitle>
-              {selectedDate && format(selectedDate, 'MMMM d, yyyy')}
+        <DrawerContent className="max-h-[88vh]">
+          <DrawerHeader className="pb-2 text-left">
+            <DrawerTitle className="text-lg">
+              {selectedDate && format(selectedDate, 'EEEE, d MMMM')}
             </DrawerTitle>
+            {selectedDateSummary && (
+              <p className="text-sm text-gray-500">{selectedDateSummary}</p>
+            )}
           </DrawerHeader>
-          <div className="overflow-y-auto px-4 pb-8">
-            {/* Day Type Radio Buttons */}
-            <div className="mb-6">
-              <h3 className="mb-2 text-sm font-medium text-gray-500">Day Type</h3>
-              <div className="grid grid-cols-4 gap-2">
-                <button
-                  onClick={() => handleDayTypeChange('none')}
-                  className={`flex h-12 flex-col items-center justify-center rounded-lg border-2 text-xs transition-colors ${
-                    selectedDayType === 'none'
-                      ? 'border-brand-fuchsia bg-brand-fuchsia/10 text-brand-fuchsia'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  <span className="text-lg">⬜</span>
-                  <span>None</span>
-                </button>
-                <button
-                  onClick={() => handleDayTypeChange('period_start')}
-                  className={`flex h-12 flex-col items-center justify-center rounded-lg border-2 text-xs transition-colors ${
-                    selectedDayType === 'period_start'
-                      ? 'border-brand-red bg-brand-red/10 text-brand-red'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  <span className="text-lg">🔴</span>
-                  <span>Start</span>
-                </button>
-                <button
-                  onClick={() => handleDayTypeChange('period_end')}
+          <div className="space-y-5 overflow-y-auto px-4 pb-8">
+            {/* Period start / end / ovulation */}
+            <SheetSection title="Cycle">
+              <div className="grid grid-cols-3 gap-2">
+                <DayTypeButton
+                  icon={<Droplet className="h-5 w-5" />}
+                  label="Period start"
+                  active={selectedDayType === 'period_start'}
+                  activeClass="border-phase-menstrual bg-phase-menstrual text-white"
+                  onClick={() => toggleDayType('period_start')}
+                />
+                <DayTypeButton
+                  icon={<DropletOff className="h-5 w-5" />}
+                  label="Period end"
+                  active={selectedDayType === 'period_end'}
+                  activeClass="border-phase-menstrual bg-phase-menstrual text-white"
                   disabled={!canSetPeriodEnd() && selectedDayType !== 'period_end'}
-                  className={`flex h-12 flex-col items-center justify-center rounded-lg border-2 text-xs transition-colors ${
-                    selectedDayType === 'period_end'
-                      ? 'border-brand-red bg-brand-red/10 text-brand-red'
-                      : !canSetPeriodEnd()
-                      ? 'cursor-not-allowed border-gray-100 text-gray-300'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  <span className="text-lg">🟢</span>
-                  <span>End</span>
-                </button>
-                <button
-                  onClick={() => handleDayTypeChange('ovulation')}
+                  onClick={() => toggleDayType('period_end')}
+                />
+                <DayTypeButton
+                  icon={<Egg className="h-5 w-5" />}
+                  label="Ovulation"
+                  active={selectedDayType === 'ovulation'}
+                  activeClass="border-phase-ovulation-strong bg-phase-ovulation-strong text-white"
                   disabled={!canSetOvulation() && selectedDayType !== 'ovulation'}
-                  className={`flex h-12 flex-col items-center justify-center rounded-lg border-2 text-xs transition-colors ${
-                    selectedDayType === 'ovulation'
-                      ? 'border-phase-ovulation bg-phase-ovulation/10 text-phase-ovulation'
-                      : !canSetOvulation()
-                      ? 'cursor-not-allowed border-gray-100 text-gray-300'
-                      : 'border-gray-200 text-gray-600 hover:border-gray-300'
-                  }`}
-                >
-                  <span className="text-lg">🥚</span>
-                  <span>Ovulation</span>
-                </button>
+                  onClick={() => toggleDayType('ovulation')}
+                />
               </div>
-            </div>
+            </SheetSection>
 
-            {/* Symptoms */}
-            <div className="space-y-4">
-              {/* Physical symptoms */}
-              <div>
-                <h3 className="mb-2 text-sm font-medium text-gray-500">
-                  {SYMPTOM_CATEGORIES.physical.label}
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  {SYMPTOM_CATEGORIES.physical.symptoms.map(({ type, label }) => (
-                    <button
-                      key={type}
-                      onClick={() => handleToggleSymptom(type)}
-                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
-                        isSymptomSelected(type)
-                          ? 'bg-brand-fuchsia text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                  {/* Custom physical symptoms */}
-                  {customSymptomsByCategory.physical.map((custom) => (
-                    <button
-                      key={`custom-${custom.id}`}
-                      onClick={() => handleToggleSymptom(`custom_${custom.id}`)}
-                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
-                        isSymptomSelected(`custom_${custom.id}`)
-                          ? 'bg-brand-fuchsia text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      {custom.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Period Pain */}
-              <div>
-                <h3 className="mb-2 text-sm font-medium text-gray-500">
-                  Pain Level
-                </h3>
-                <div className="flex gap-1">
-                  {PERIOD_PAIN_LEVELS.map(({ type, label }) => (
-                    <button
-                      key={type}
-                      onClick={() => handlePainLevelChange(type)}
-                      className={`flex h-9 w-9 items-center justify-center rounded-lg text-sm font-medium transition-colors ${
-                        getSelectedPainLevel() === type
-                          ? 'bg-brand-fuchsia text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Mood symptoms */}
-              <div>
-                <h3 className="mb-2 text-sm font-medium text-gray-500">
-                  {SYMPTOM_CATEGORIES.mood.label}
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  {SYMPTOM_CATEGORIES.mood.symptoms.map(({ type, label }) => (
-                    <button
-                      key={type}
-                      onClick={() => handleToggleSymptom(type)}
-                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
-                        isSymptomSelected(type)
-                          ? 'bg-brand-fuchsia text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                  {/* Custom mood symptoms */}
-                  {customSymptomsByCategory.mood.map((custom) => (
-                    <button
-                      key={`custom-${custom.id}`}
-                      onClick={() => handleToggleSymptom(`custom_${custom.id}`)}
-                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
-                        isSymptomSelected(`custom_${custom.id}`)
-                          ? 'bg-brand-fuchsia text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      {custom.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Flow symptoms */}
-              <div>
-                <h3 className="mb-2 text-sm font-medium text-gray-500">
-                  {SYMPTOM_CATEGORIES.flow.label}
-                </h3>
-                <div className="flex flex-wrap gap-2">
-                  {SYMPTOM_CATEGORIES.flow.symptoms.map(({ type, label }) => (
-                    <button
-                      key={type}
-                      onClick={() => handleToggleSymptom(type)}
-                      className={`rounded-full px-3 py-1.5 text-sm transition-colors ${
-                        isSymptomSelected(type)
-                          ? 'bg-brand-fuchsia text-white'
-                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Add Custom Symptom Button / Form */}
-              <div className="pt-2">
-                {!isCreatingCustomSymptom ? (
+            {/* Flow: one choice */}
+            <SheetSection title="Flow">
+              <div className="grid grid-cols-4 overflow-hidden rounded-xl border border-gray-200">
+                {FLOW_OPTIONS.map(({ type, label }, index) => (
                   <button
-                    onClick={() => setIsCreatingCustomSymptom(true)}
-                    className="flex items-center gap-1 text-sm text-brand-fuchsia hover:text-brand-red"
+                    key={type}
+                    onClick={() => handleFlowChange(type)}
+                    aria-pressed={isSymptomSelected(type)}
+                    className={`h-11 text-sm transition-colors ${index > 0 ? 'border-l border-gray-200' : ''} ${
+                      isSymptomSelected(type)
+                        ? 'bg-phase-menstrual font-semibold text-white'
+                        : 'bg-white text-gray-700'
+                    }`}
                   >
-                    <PlusIcon />
-                    Add custom symptom
+                    {label}
                   </button>
-                ) : (
-                  <div className="space-y-3 rounded-lg border border-gray-200 p-3">
-                    {/* Category selection */}
-                    {!newSymptomCategory ? (
-                      <div>
-                        <p className="mb-2 text-sm text-gray-600">Select category:</p>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => setNewSymptomCategory('physical')}
-                            className="rounded-full bg-gray-100 px-4 py-2 text-sm text-gray-700 hover:bg-gray-200"
-                          >
-                            Physical
-                          </button>
-                          <button
-                            onClick={() => setNewSymptomCategory('mood')}
-                            className="rounded-full bg-gray-100 px-4 py-2 text-sm text-gray-700 hover:bg-gray-200"
-                          >
-                            Mood
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div>
-                        <p className="mb-2 text-sm text-gray-600">
-                          New {newSymptomCategory} symptom:
-                        </p>
-                        <div className="flex gap-2">
-                          <Input
-                            type="text"
-                            value={newSymptomName}
-                            onChange={(e) => setNewSymptomName(e.target.value)}
-                            placeholder="Symptom name"
-                            className="flex-1 text-base"
-                            autoFocus
-                          />
-                          <button
-                            onClick={handleCreateCustomSymptom}
-                            disabled={!newSymptomName.trim()}
-                            className="rounded-lg bg-brand-fuchsia px-4 py-2 text-sm text-white hover:bg-brand-red disabled:opacity-50"
-                          >
-                            Add
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                    <button
-                      onClick={() => {
-                        setIsCreatingCustomSymptom(false);
-                        setNewSymptomCategory(null);
-                        setNewSymptomName('');
-                      }}
-                      className="text-sm text-gray-500 hover:text-gray-700"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                )}
+                ))}
               </div>
+            </SheetSection>
+
+            {/* Pain: slider from 0 (none) to 10 */}
+            <SheetSection
+              title="Pain"
+              value={(() => {
+                const level = painDraft ?? selectedPainLevel;
+                return level === 0 ? 'None' : `${level} of 10`;
+              })()}
+            >
+              <input
+                type="range"
+                min={0}
+                max={10}
+                step={1}
+                value={painDraft ?? selectedPainLevel}
+                onChange={(e) => handlePainDrag(Number(e.target.value))}
+                onPointerUp={commitPainLevel}
+                onTouchEnd={commitPainLevel}
+                onKeyUp={commitPainLevel}
+                onBlur={commitPainLevel}
+                aria-label="Pain level from 0 to 10"
+                className="h-11 w-full accent-brand-red"
+              />
+              <div className="-mt-1 flex justify-between text-xs text-gray-400">
+                <span>None</span>
+                <span>5</span>
+                <span>10</span>
+              </div>
+            </SheetSection>
+
+            {/* Physical symptoms */}
+            <SheetSection title={SYMPTOM_CATEGORIES.physical.label}>
+              <div className="flex flex-wrap gap-2">
+                {SYMPTOM_CATEGORIES.physical.symptoms.map(({ type, label }) => (
+                  <SymptomChip
+                    key={type}
+                    label={label}
+                    selected={isSymptomSelected(type)}
+                    onClick={() => handleToggleSymptom(type)}
+                  />
+                ))}
+                {customSymptomsByCategory.physical.map((custom) => (
+                  <SymptomChip
+                    key={`custom-${custom.id}`}
+                    label={custom.name}
+                    selected={isSymptomSelected(`custom_${custom.id}`)}
+                    onClick={() => handleToggleSymptom(`custom_${custom.id}`)}
+                  />
+                ))}
+              </div>
+            </SheetSection>
+
+            {/* Mood symptoms */}
+            <SheetSection title={SYMPTOM_CATEGORIES.mood.label}>
+              <div className="flex flex-wrap gap-2">
+                {SYMPTOM_CATEGORIES.mood.symptoms.map(({ type, label }) => (
+                  <SymptomChip
+                    key={type}
+                    label={label}
+                    selected={isSymptomSelected(type)}
+                    onClick={() => handleToggleSymptom(type)}
+                  />
+                ))}
+                {customSymptomsByCategory.mood.map((custom) => (
+                  <SymptomChip
+                    key={`custom-${custom.id}`}
+                    label={custom.name}
+                    selected={isSymptomSelected(`custom_${custom.id}`)}
+                    onClick={() => handleToggleSymptom(`custom_${custom.id}`)}
+                  />
+                ))}
+              </div>
+            </SheetSection>
+
+            {/* Add Custom Symptom Button / Form */}
+            <div>
+              {!isCreatingCustomSymptom ? (
+                <button
+                  onClick={() => setIsCreatingCustomSymptom(true)}
+                  className="flex h-11 items-center gap-1 rounded-full border border-dashed border-brand-red/50 px-4 text-sm font-medium text-brand-red"
+                >
+                  <PlusIcon />
+                  Add custom symptom
+                </button>
+              ) : (
+                <div className="space-y-3 rounded-xl border border-gray-200 p-3">
+                  {!newSymptomCategory ? (
+                    <div>
+                      <p className="mb-2 text-sm text-gray-600">Choose a category</p>
+                      <div className="flex gap-2">
+                        <SymptomChip label="Physical" selected={false} onClick={() => setNewSymptomCategory('physical')} />
+                        <SymptomChip label="Mood" selected={false} onClick={() => setNewSymptomCategory('mood')} />
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="mb-2 text-sm text-gray-600">
+                        New {newSymptomCategory} symptom
+                      </p>
+                      <div className="flex gap-2">
+                        <Input
+                          type="text"
+                          value={newSymptomName}
+                          onChange={(e) => setNewSymptomName(e.target.value)}
+                          placeholder="Symptom name"
+                          className="h-11 flex-1 text-base"
+                          autoFocus
+                        />
+                        <button
+                          onClick={handleCreateCustomSymptom}
+                          disabled={!newSymptomName.trim()}
+                          className="h-11 rounded-lg bg-brand-red px-4 text-sm font-medium text-white disabled:opacity-50"
+                        >
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    onClick={() => {
+                      setIsCreatingCustomSymptom(false);
+                      setNewSymptomCategory(null);
+                      setNewSymptomName('');
+                    }}
+                    className="h-11 px-1 text-sm text-gray-500"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Notes Section */}
-            <div className="mt-6 border-t border-gray-200 pt-4">
-              <h3 className="mb-2 text-sm font-medium text-gray-500">Note</h3>
+            <SheetSection title="Note">
               <textarea
                 value={noteText}
                 onChange={(e) => setNoteText(e.target.value)}
                 onBlur={handleSaveNote}
-                placeholder="Add a note for this day..."
-                className="w-full rounded-lg border border-gray-200 p-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-brand-fuchsia focus:outline-none focus:ring-1 focus:ring-brand-fuchsia"
+                placeholder="Add a note for this day"
+                className="w-full rounded-xl border border-gray-200 p-3 text-base text-gray-900 placeholder:text-gray-400 focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
                 rows={3}
               />
-            </div>
+            </SheetSection>
           </div>
         </DrawerContent>
       </Drawer>
     </div>
+  );
+}
+
+function SheetSection({
+  title,
+  value,
+  children,
+}: {
+  title: string;
+  value?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section>
+      <div className="mb-2 flex items-baseline justify-between">
+        <h3 className="text-sm font-medium text-gray-500">{title}</h3>
+        {value && <span className="text-sm font-semibold text-gray-900">{value}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function DayTypeButton({
+  icon,
+  label,
+  active,
+  activeClass,
+  disabled = false,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  active: boolean;
+  activeClass: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      className={`flex h-16 flex-col items-center justify-center gap-1 rounded-xl border text-sm font-medium transition-colors ${
+        active
+          ? activeClass
+          : disabled
+          ? 'cursor-not-allowed border-gray-100 text-gray-300'
+          : 'border-gray-200 text-gray-700'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  );
+}
+
+function SymptomChip({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={selected}
+      className={`h-11 rounded-full px-4 text-sm transition-colors ${
+        selected ? 'bg-brand-red font-medium text-white' : 'bg-gray-100 text-gray-700'
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 

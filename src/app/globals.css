@@ -17,7 +17,7 @@
   --color-ovulation: #22C55E;
   --color-luteal: #24b2c5;
 
-  /* Soft fills and readable text for calendar cells */
+  /* Soft fills and readable text for calendar cells (follicular amber, luteal teal) */
   --color-menstrual-soft: #FBE3EE;
   --color-follicular-soft: #FCEBC2;
   --color-follicular-ink: #7A4A00;
