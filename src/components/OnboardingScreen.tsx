@@ -1,9 +1,8 @@
 'use client';
 
+import { basePath } from '@/lib/base-path';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-
-const basePath = process.env.NODE_ENV === 'production' ? '/offline-period-tracker' : '';
 
 interface OnboardingScreenProps {
   onComplete: () => void;

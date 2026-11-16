@@ -1,7 +1,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const BASE_PATH = '/offline-period-tracker';
+// Must match basePath in next.config.ts
+const BASE_PATH = process.env.BUILD_TARGET === 'mobile' ? '' : '/offline-period-tracker';
 const OUT_DIR = path.join(__dirname, '..', 'out');
 const CACHE_VERSION = Date.now();
 

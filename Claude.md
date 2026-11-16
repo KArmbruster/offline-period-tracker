@@ -324,13 +324,20 @@ Accessible from Settings > User Guide. Contains:
 ## Development Commands
 ```bash
 npm run dev              # Start development server
-npm run build            # Build web assets (static export)
+npm run build            # Build web assets (static export, GitHub Pages base path)
+npm run build:mobile     # Build without base path and run cap sync (native app)
 npm test                 # Run the cycle logic tests (Vitest)
 npx cap sync             # Copy build to native platforms
 npx cap open ios         # Open Xcode
 npx cap open android     # Open Android Studio
 npx cap run android      # Run on Android device/emulator
 ```
+
+## Base Path
+- The web build is served from `/offline-period-tracker` (GitHub Pages); development and the native build are served from the root
+- `next.config.ts` decides this (`BUILD_TARGET=mobile` removes the prefix) and exposes it as `NEXT_PUBLIC_BASE_PATH`
+- In app code always import `basePath` from `src/lib/base-path.ts`; never hard-code the repo path
+- `public/manifest.json` uses relative URLs so it works under any base path
 
 ## Adding a New Symptom Type
 1. Add to `SymptomType` enum in `types.ts`
@@ -360,4 +367,4 @@ npx cap run android      # Run on Android device/emulator
 - [x] Data export/import
 - [x] PWA configuration
 - [x] Mobile safe area handling (browser chrome)
-- [ ] Capacitor mobile builds (not yet tested)
+- [ ] Capacitor mobile builds (web bundle loads from the root; not yet run on a device)

@@ -3,6 +3,7 @@ import { Geist } from "next/font/google";
 import "./globals.css";
 import { AppProvider } from "@/context/AppContext";
 import { ServiceWorkerRegistration } from "@/components/ServiceWorkerRegistration";
+import { basePath } from "@/lib/base-path";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -12,7 +13,7 @@ const geistSans = Geist({
 export const metadata: Metadata = {
   title: "Offline Period Tracker",
   description: "Privacy-first offline period tracking app",
-  manifest: (process.env.NODE_ENV === "production" ? "/offline-period-tracker" : "") + "/manifest.json",
+  manifest: `${basePath}/manifest.json`,
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",

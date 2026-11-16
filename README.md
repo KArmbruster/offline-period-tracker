@@ -44,21 +44,23 @@ Your data is stored only in the app on that one phone. There is no cloud copy an
 
 The installed app updates itself the next time it is opened with an internet connection. Your data stays in place.
 
-## Native Android app (not working yet)
+## Native Android app (experimental)
 
-The repository contains a Capacitor Android project in `android/`, with the launcher icons and an encrypted SQLite database prepared. It has not been built or tested on a device.
+The repository contains a Capacitor Android project in `android/`, with the launcher icons and an encrypted SQLite database prepared. The web part of the native build is verified to load, but the app has not been built in Android Studio or run on a device yet, so expect rough edges.
 
-One known blocker: the production build is configured for the GitHub Pages address, so every asset path starts with `/offline-period-tracker`. A native app serves its files from the root, so a build made with `npm run build` will not load correctly inside the Android app until the base path is made configurable. The affected places are `next.config.ts`, `src/app/layout.tsx`, `ServiceWorkerRegistration.tsx`, `OnboardingScreen.tsx`, `SettingsView.tsx`, `scripts/generate-sw.js` and `public/manifest.json`.
-
-Once that is solved, the steps are:
+You need [Android Studio](https://developer.android.com/studio) and a phone with USB debugging enabled, or an emulator.
 
 ```bash
-npm run build
-npx cap sync android
+npm install
+npm run build:mobile
 npx cap open android
 ```
 
-Then build and run from Android Studio on a connected phone or an emulator. Signing keys (`*.jks`, `*.keystore`) are git-ignored and must never be committed.
+`npm run build:mobile` builds the app without the GitHub Pages path prefix and copies it into the Android project. Then press **Run** in Android Studio to install it on the connected phone.
+
+Do not use `npm run build` for the native app: that build expects to live under `/offline-period-tracker` and shows a blank screen inside the app.
+
+The native app keeps its data in its own encrypted database. It does not share data with the browser version; use export and import to move between them. Signing keys (`*.jks`, `*.keystore`) are git-ignored and must never be committed.
 
 ## Development
 
@@ -69,7 +71,8 @@ npm install
 npm run dev      # start the development server on http://localhost:3000
 npm test         # run the cycle logic tests
 npm run lint     # lint
-npm run build    # static export to out/ plus the service worker
+npm run build    # static export to out/ plus the service worker (for GitHub Pages)
+npm run build:mobile  # build for the native app and sync it into android/
 ```
 
 Pushing to `main` builds the app and publishes it to GitHub Pages (see `.github/workflows/deploy_pages.yml`).

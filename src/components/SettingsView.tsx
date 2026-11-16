@@ -1,5 +1,6 @@
 'use client';
 
+import { basePath } from '@/lib/base-path';
 import { useState, useCallback } from 'react';
 import { format } from 'date-fns';
 import { BookOpen, ChevronRight, Download, Trash2, Upload } from 'lucide-react';
@@ -8,8 +9,6 @@ import { db } from '@/lib/db';
 import UserGuide from '@/components/UserGuide';
 import ConfirmSheet, { type ConfirmSheetContent } from '@/components/ConfirmSheet';
 import type { ExportData } from '@/types';
-
-const basePath = process.env.NODE_ENV === 'production' ? '/offline-period-tracker' : '';
 
 export default function SettingsView() {
   const { resetApp } = useApp();
