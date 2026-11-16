@@ -27,13 +27,18 @@ A 100% local, offline menstrual tracking application with zero data exfiltration
 | Fuchsia | `#FE68A7` | Highlights, buttons |
 
 ## Calendar Phase Colors
+Logged days are filled, predicted days have a dashed outline. Follicular and luteal use a soft fill with dark text so the day number stays readable.
+
 | Phase | Color | Hex | Style |
 |-------|-------|-----|-------|
-| Menstrual | Red | `#B3014F` | Solid fill |
-| Follicular | Teal | `#24b2c5` | Solid fill |
+| Menstrual | Red | `#B3014F` | Solid band joining the period days, white text |
+| Follicular | Amber | `#F0B429` (fill `#FCEBC2`, text `#7A4A00`) | Soft fill circle |
 | Fertile | Green | `#22C55E` | Ring/outline only (shown on underlying phase) |
-| Ovulation | Green | `#22C55E` | Solid fill |
-| Luteal | Blue | `#3B82F6` | Solid fill |
+| Ovulation | Green | `#15803D` | Solid circle, white text |
+| Luteal | Teal | `#24b2c5` (fill `#D3F0F4`, text `#0B5560`) | Soft fill circle |
+| Today | Ink | `#2A1420` | Dark ring with white gap + "Today" label |
+
+All colors are tokens in `globals.css` (`bg-phase-luteal-soft`, `text-phase-luteal-ink`, `ring-ink`, ...).
 
 ## File Structure
 ```
@@ -46,12 +51,13 @@ src/
 ├── components/
 │   ├── ui/                  # ShadCN primitives (button, drawer, input)
 │   ├── CalendarView.tsx     # Main calendar with phase display
+│   ├── CycleStatusCard.tsx  # Cycle day, phase and next period, above the calendar
 │   ├── InsightsView.tsx     # Statistics and symptom history
 │   ├── SettingsView.tsx     # PIN change, export/import, reset
 │   ├── MainApp.tsx          # Tab navigation container
 │   ├── OnboardingScreen.tsx # First-launch introduction slides
 │   ├── PinScreen.tsx        # PIN entry for unlock/setup
-│   ├── PhaseSymptoms.tsx    # Today's phase symptom display
+│   ├── PhaseSymptoms.tsx    # Common symptoms for today's phase
 │   ├── UserGuide.tsx        # In-app user guide with privacy info
 │   └── ServiceWorkerRegistration.tsx # PWA service worker
 ├── context/
@@ -158,15 +164,19 @@ enum SymptomType {
 
 ## Cycle Logic
 
+All phase calculations live in `createCycleModel()` in `cycle-logic.ts`. The calendar, the phase panel and the symptom statistics all read from it; do not compute phases anywhere else.
+
 ### Average Cycle Length
 - Mean of last 6 completed cycles
 - Default: 28 days (if < 2 cycles recorded)
-- No special handling for outliers - simple average
+- Gaps of 60+ days, or longer than 1.5x the median of the recent cycles, are ignored (a period that was not logged, not a real cycle)
+- Predictions use the exact mean and round each projected date, so they do not drift
 
 ### Phase Definitions (in visual priority order)
-1. **Menstrual**: `period_start` to `period_end` (default 5 days if end unknown)
-2. **Ovulation**: User-marked date (stored in `cycles.ovulation_date`) OR estimated as `CycleLength - 14 days`
-3. **Fertile Window**: `O_day - 4` to `O_day + 1` (displayed as green ring overlay on underlying phase)
+1. **Menstrual**: `period_start` to `period_end` (default 5 days if end unknown, max 14 days can be logged)
+2. **Ovulation**: User-marked date (stored in `cycles.ovulation_date`) OR estimated as cycle day `CycleLength - 14` (day 14 of a 28-day cycle)
+   - Completed cycles use their own real length; the current cycle uses the average
+3. **Fertile Window**: `O_day - 5` to `O_day + 1` (displayed as green ring overlay on underlying phase)
 4. **Follicular**: End of Menstrual to day before Ovulation
 5. **Luteal**: Day after Ovulation to next `period_start`
 
@@ -174,31 +184,37 @@ enum SymptomType {
 | Days | Phase | Calendar Color |
 |------|-------|----------------|
 | 1-5 | Menstruation | Red (solid) |
-| 6-9 | Follicular | Teal (solid) |
-| 10-14 | Follicular + Fertile | Teal (solid) + Green ring |
-| 14 | Ovulation | Green (solid) |
-| 15 | Luteal + Fertile | Blue (solid) + Green ring |
-| 16-28 | Luteal | Blue (solid) |
+| 6-8 | Follicular | Amber (soft) |
+| 9-13 | Follicular + Fertile | Amber (soft) + Green ring |
+| 14 | Ovulation | Green (solid) + Green ring |
+| 15 | Luteal + Fertile | Teal (soft) + Green ring |
+| 16-28 | Luteal | Teal (soft) |
 
 ### Conflict Resolution
-- If "Fertile" overlaps with "Menstrual" (short cycles), **Menstrual wins** visually
+- If "Fertile" overlaps with "Menstrual" (short cycles), **Menstrual wins**: no fertile ring on period days
 - Fertile window is shown as a ring/outline overlay, not a separate background color
-- The day after ovulation shows as Luteal (blue) but still has the fertile ring
+- The day after ovulation shows as Luteal (teal) but still has the fertile ring
+
+### Late Period
+- A period that is due or late and not logged is never drawn in the past: those days stay Luteal
+- The predicted period slides forward and starts tomorrow at the earliest
+- More than one full cycle length overdue: no phase is shown for the days beyond
 
 ## Predictions
-- Project 12 months into the future
+- Project 12 months into the future, from the first logged cycle on
 - Formula: `LastPeriodStart + (n × AverageCycleLength)`
-- Predictions shown with reduced opacity (70%)
+- Predictions shown with a dashed outline instead of a solid fill
 
 ## Calendar View
 
 ### Layout
-- Month name displayed at top with navigation arrows
+- Status card at the top: cycle day, current phase, next period (or how late it is), fertile hint
+- Month name with a "Today" button and navigation arrows; the Today button is highlighted when another month is shown
 - Monday as first day of week
 - Day number in each cell
-- Cell background color indicates phase
-- Today highlighted with a ring in phase-contrasting color
-- Pen icon on days with user entries (period start/end, ovulation, symptoms)
+- Cell fill indicates phase (see Calendar Phase Colors)
+- Today marked with a dark ring and a "Today" label
+- Small dot on days with user entries (period start/end, ovulation, symptoms, notes)
 
 ### Day Drawer
 Tap any non-future date to open bottom drawer with:
@@ -219,10 +235,10 @@ When no data exists, show message:
 > "Start tracking your periods as they come, or fill in historic data from the last 6 months."
 
 ### Phase Legend
-Displayed below calendar showing all phase colors
+Compact row below the calendar: Period, Follicular, Ovulation, Luteal, Fertile, Predicted
 
 ### Phase Symptoms
-Shows historical symptoms for today's current phase from last 6 cycles
+Below the legend: historical symptoms for today's current phase from last 6 cycles
 
 ## Insights View
 
@@ -236,7 +252,7 @@ Based on last 6 cycles:
 ### Common Symptoms by Phase
 For each phase (Menstrual, Follicular, Ovulation, Luteal):
 - Shows ALL symptoms recorded during that phase
-- Displays occurrence count as "X/6" (X out of last 6 cycles)
+- Displays occurrence count as "X/6": the number of the last 6 cycles in which the symptom was logged in that phase (several days in one cycle count once)
 - Most common symptoms displayed first
 - Empty state message if no symptoms recorded
 
@@ -272,7 +288,7 @@ Accessible from Settings > User Guide. Contains:
 
 ### Visual Guides
 - Calendar color legend (phase colors)
-- Calendar icon meanings (circle, star, pen)
+- Calendar marker meanings (today ring, dashed outline, dot)
 
 ## Data Export/Import
 
@@ -346,7 +362,7 @@ npx cap run android      # Run on Android device/emulator
 - [x] Day notes
 - [x] Insights view with statistics
 - [x] Common symptoms by phase
-- [x] Phase symptoms display (current phase, common symptoms, next period countdown)
+- [x] Cycle status card (cycle day, current phase, next period countdown) and phase symptoms
 - [x] Settings page
 - [x] User guide with privacy info
 - [x] Data export/import

@@ -20,7 +20,7 @@ const PHASE_INFO: Record<PhaseType, { name: string; color: string; bgColor: stri
   },
   [PhaseType.FOLLICULAR]: {
     name: 'Follicular',
-    color: 'text-phase-follicular',
+    color: 'text-phase-follicular-ink',
     bgColor: 'bg-phase-follicular',
   },
   [PhaseType.FERTILE]: {
@@ -30,12 +30,12 @@ const PHASE_INFO: Record<PhaseType, { name: string; color: string; bgColor: stri
   },
   [PhaseType.OVULATION]: {
     name: 'Ovulation',
-    color: 'text-phase-ovulation',
-    bgColor: 'bg-phase-ovulation',
+    color: 'text-phase-ovulation-strong',
+    bgColor: 'bg-phase-ovulation-strong',
   },
   [PhaseType.LUTEAL]: {
     name: 'Luteal',
-    color: 'text-phase-luteal',
+    color: 'text-phase-luteal-ink',
     bgColor: 'bg-phase-luteal',
   },
 };
@@ -93,22 +93,12 @@ export default function InsightsView() {
       return result;
     }
 
-    const avgCycleLength = cycleLengthStats?.avg || 28;
-
     SYMPTOM_PHASES.forEach((phase) => {
-      const phaseSymptoms = getSymptomsForPhaseHistory(
-        phase,
-        cycles,
-        symptoms,
-        avgCycleLength,
-        6
-      );
-      // Show all symptoms, not just top 3
-      result[phase] = phaseSymptoms;
+      result[phase] = getSymptomsForPhaseHistory(phase, cycles, symptoms, 6);
     });
 
     return result;
-  }, [cycles, symptoms, cycleLengthStats]);
+  }, [cycles, symptoms]);
 
   // Check if there are any symptoms recorded
   const hasAnySymptoms = symptoms.length > 0;
@@ -210,7 +200,7 @@ export default function InsightsView() {
                     {avgPain !== null && (
                       <div className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1">
                         <span className="text-xs text-gray-700">
-                          Pain (Ø {avgPain.toLocaleString('de-DE', { minimumFractionDigits: 1, maximumFractionDigits: 1 })})
+                          Pain (Ø {avgPain.toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 })})
                         </span>
                       </div>
                     )}

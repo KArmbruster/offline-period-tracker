@@ -12,10 +12,21 @@
 
   /* Phase Colors */
   --color-menstrual: #B3014F;
-  --color-follicular: #24b2c5;
+  --color-follicular: #F0B429;
   --color-fertile: #22C55E;
   --color-ovulation: #22C55E;
-  --color-luteal: #3B82F6;
+  --color-luteal: #24b2c5;
+
+  /* Soft fills and readable text for calendar cells */
+  --color-menstrual-soft: #FBE3EE;
+  --color-follicular-soft: #FCEBC2;
+  --color-follicular-ink: #7A4A00;
+  --color-ovulation-strong: #15803D;
+  --color-ovulation-soft: #DCFCE7;
+  --color-ovulation-ink: #14532D;
+  --color-luteal-soft: #D3F0F4;
+  --color-luteal-ink: #0B5560;
+  --color-today: #2A1420;
 
   /* UI Colors */
 
@@ -72,6 +83,15 @@
   --color-phase-fertile: var(--color-fertile);
   --color-phase-ovulation: var(--color-ovulation);
   --color-phase-luteal: var(--color-luteal);
+  --color-phase-menstrual-soft: var(--color-menstrual-soft);
+  --color-phase-follicular-soft: var(--color-follicular-soft);
+  --color-phase-follicular-ink: var(--color-follicular-ink);
+  --color-phase-ovulation-strong: var(--color-ovulation-strong);
+  --color-phase-ovulation-soft: var(--color-ovulation-soft);
+  --color-phase-ovulation-ink: var(--color-ovulation-ink);
+  --color-phase-luteal-soft: var(--color-luteal-soft);
+  --color-phase-luteal-ink: var(--color-luteal-ink);
+  --color-ink: var(--color-today);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);

@@ -1,239 +1,167 @@
 import {
   addDays,
-  differenceInDays,
+  differenceInCalendarDays,
   format,
   parseISO,
-  isWithinInterval,
   startOfDay,
-  isSameDay,
 } from 'date-fns';
 import type { Cycle, PhaseType } from '@/types';
 import { PhaseType as Phase } from '@/types';
 
 const DEFAULT_CYCLE_LENGTH = 28;
 const DEFAULT_PERIOD_LENGTH = 5;
-const OVULATION_OFFSET = 14; // Days before next period
+const LUTEAL_LENGTH = 14; // Days between ovulation and the next period start
 const FERTILE_WINDOW_BEFORE = 5; // Days before ovulation
 const FERTILE_WINDOW_AFTER = 1; // Days after ovulation
+const MAX_CYCLES = 6;
+const MAX_VALID_CYCLE_LENGTH = 60; // Longer gaps are treated as missing data
+const OUTLIER_FACTOR = 1.5; // Gaps above 1.5x the median are a skipped log, not a cycle
+export const MAX_PERIOD_LENGTH = 14; // Longest period the UI lets the user log
+const PREDICTION_DAYS = 365;
 
-/**
- * Calculate average cycle length from last 6 completed cycles
- */
-export function calculateAverageCycleLength(cycles: Cycle[]): number {
-  // Need at least 2 cycles to calculate (we compare consecutive starts)
-  if (cycles.length < 2) {
-    return DEFAULT_CYCLE_LENGTH;
-  }
-
-  // Sort by start date descending
-  const sortedCycles = [...cycles].sort(
-    (a, b) => parseISO(b.period_start_date).getTime() - parseISO(a.period_start_date).getTime()
+function sortAscending(cycles: Cycle[]): Cycle[] {
+  return [...cycles].sort((a, b) =>
+    a.period_start_date < b.period_start_date ? -1 : a.period_start_date > b.period_start_date ? 1 : 0
   );
+}
 
-  // Take up to last 6 cycles (which gives us up to 5 intervals)
-  const recentCycles = sortedCycles.slice(0, 7);
-  const cycleLengths: number[] = [];
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+}
 
-  for (let i = 0; i < recentCycles.length - 1 && cycleLengths.length < 6; i++) {
-    const currentStart = parseISO(recentCycles[i].period_start_date);
-    const previousStart = parseISO(recentCycles[i + 1].period_start_date);
-    const length = differenceInDays(currentStart, previousStart);
-
-    if (length > 0 && length < 60) {
-      // Sanity check: cycles between 1-60 days
-      cycleLengths.push(length);
-    }
-  }
-
-  if (cycleLengths.length === 0) {
-    return DEFAULT_CYCLE_LENGTH;
-  }
-
-  const sum = cycleLengths.reduce((a, b) => a + b, 0);
-  return Math.round(sum / cycleLengths.length);
+function isPlausibleCycleLength(length: number, typicalLength: number): boolean {
+  return length > 0 && length < MAX_VALID_CYCLE_LENGTH && length <= typicalLength * OUTLIER_FACTOR;
 }
 
 /**
- * Calculate period duration (average or specific cycle)
+ * Lengths of the most recent cycles (start to next start), newest first.
+ * Gaps that are far longer than the others are dropped: they almost always
+ * mean a period was not logged, and would otherwise skew every prediction.
+ */
+export function getRecentCycleLengths(cycles: Cycle[], maxCycles: number = MAX_CYCLES): number[] {
+  const sorted = sortAscending(cycles);
+  const lengths: number[] = [];
+
+  for (let i = sorted.length - 1; i > 0 && lengths.length < maxCycles; i--) {
+    const length = differenceInCalendarDays(
+      parseISO(sorted[i].period_start_date),
+      parseISO(sorted[i - 1].period_start_date)
+    );
+    if (length > 0 && length < MAX_VALID_CYCLE_LENGTH) {
+      lengths.push(length);
+    }
+  }
+
+  if (lengths.length < 3) {
+    return lengths;
+  }
+
+  const typical = median(lengths);
+  return lengths.filter((length) => length <= typical * OUTLIER_FACTOR);
+}
+
+/**
+ * Exact (unrounded) mean cycle length. Used for projecting far into the
+ * future, where a rounded value would drift by several days.
+ */
+export function calculateMeanCycleLength(cycles: Cycle[]): number {
+  const lengths = getRecentCycleLengths(cycles);
+  if (lengths.length === 0) {
+    return DEFAULT_CYCLE_LENGTH;
+  }
+  return lengths.reduce((a, b) => a + b, 0) / lengths.length;
+}
+
+/**
+ * Average cycle length in whole days from the last 6 completed cycles
+ */
+export function calculateAverageCycleLength(cycles: Cycle[]): number {
+  return Math.round(calculateMeanCycleLength(cycles));
+}
+
+/**
+ * Period duration of one cycle in days, counting both the start and end day
  */
 export function calculatePeriodDuration(cycle: Cycle): number {
   if (!cycle.period_end_date) {
     return DEFAULT_PERIOD_LENGTH;
   }
 
-  const start = parseISO(cycle.period_start_date);
-  const end = parseISO(cycle.period_end_date);
-  const duration = differenceInDays(end, start) + 1; // Include both start and end days
+  const duration =
+    differenceInCalendarDays(parseISO(cycle.period_end_date), parseISO(cycle.period_start_date)) + 1;
 
   return duration > 0 ? duration : DEFAULT_PERIOD_LENGTH;
 }
 
+function getRecentPeriodDurations(cycles: Cycle[], maxCycles: number = MAX_CYCLES): number[] {
+  return sortAscending(cycles.filter((c) => c.period_end_date))
+    .reverse()
+    .slice(0, maxCycles)
+    .map(calculatePeriodDuration);
+}
+
 /**
- * Calculate average period duration from cycles
+ * Average period duration from the last 6 periods that have an end date
  */
 export function calculateAveragePeriodDuration(cycles: Cycle[]): number | null {
-  const cyclesWithEnd = cycles.filter((c) => c.period_end_date);
-
-  if (cyclesWithEnd.length === 0) {
+  const durations = getRecentPeriodDurations(cycles);
+  if (durations.length === 0) {
     return null;
   }
-
-  const durations = cyclesWithEnd.map(calculatePeriodDuration);
-  const sum = durations.reduce((a, b) => a + b, 0);
-
-  return Math.round(sum / durations.length);
+  return Math.round(durations.reduce((a, b) => a + b, 0) / durations.length);
 }
 
-/**
- * Get ovulation date for a cycle
- * Uses cycle.ovulation_date if set, otherwise estimates based on cycle length
- */
-export function getOvulationDate(
-  cycle: Cycle,
-  cycleLength: number
-): Date {
-  if (cycle.ovulation_date) {
-    return parseISO(cycle.ovulation_date);
+function toStats(values: number[]): { min: number; max: number; avg: number } | null {
+  if (values.length === 0) {
+    return null;
   }
-
-  // Estimate: cycle length - 14 days
-  const start = parseISO(cycle.period_start_date);
-  return addDays(start, cycleLength - OVULATION_OFFSET);
-}
-
-/**
- * Get fertile window dates
- */
-export function getFertileWindow(ovulationDate: Date): { start: Date; end: Date } {
   return {
-    start: addDays(ovulationDate, -FERTILE_WINDOW_BEFORE),
-    end: addDays(ovulationDate, FERTILE_WINDOW_AFTER),
+    min: Math.min(...values),
+    max: Math.max(...values),
+    avg: Math.round(values.reduce((a, b) => a + b, 0) / values.length),
   };
 }
 
 /**
- * Determine the phase for a given date
+ * Get period duration variation (min, max, avg) from last N cycles
  */
-export function getPhaseForDate(
-  date: Date,
-  currentCycle: Cycle | null,
-  nextCycleStart: Date | null,
-  cycleLength: number
-): PhaseType | null {
-  if (!currentCycle) {
-    return null;
-  }
-
-  const periodStart = parseISO(currentCycle.period_start_date);
-  const periodEnd = currentCycle.period_end_date
-    ? parseISO(currentCycle.period_end_date)
-    : addDays(periodStart, DEFAULT_PERIOD_LENGTH - 1);
-
-  // Check if in menstrual phase (highest priority)
-  if (
-    isWithinInterval(date, { start: startOfDay(periodStart), end: startOfDay(periodEnd) }) ||
-    isSameDay(date, periodStart) ||
-    isSameDay(date, periodEnd)
-  ) {
-    return Phase.MENSTRUAL;
-  }
-
-  // Calculate ovulation (uses cycle.ovulation_date if set, otherwise estimates)
-  const ovulationDate = getOvulationDate(currentCycle, cycleLength);
-
-  // Check if ovulation day
-  if (isSameDay(date, ovulationDate)) {
-    return Phase.OVULATION;
-  }
-
-  // Check follicular phase (after period, up to and including fertile days before ovulation)
-  if (date > periodEnd && date < ovulationDate) {
-    return Phase.FOLLICULAR;
-  }
-
-  // Check luteal phase (after ovulation, before next period)
-  // Note: The day after ovulation is still fertile but phase is luteal
-  const cycleEnd = nextCycleStart || addDays(periodStart, cycleLength - 1);
-
-  if (date > ovulationDate && date <= cycleEnd) {
-    return Phase.LUTEAL;
-  }
-
-  return null;
-}
-
-
-/**
- * Get predicted phase for a future date (beyond recorded cycles)
- * Uses the average cycle length to project phases into the future
- * Predictions are limited to 12 months (365 days) from today
- */
-export function getPredictedPhaseForDate(
-  date: Date,
+export function getPeriodDurationStats(
   cycles: Cycle[],
-  cycleLength: number,
-  averagePeriodLength: number = DEFAULT_PERIOD_LENGTH
-): PhaseType | null {
-  if (cycles.length === 0) return null;
+  maxCycles: number = MAX_CYCLES
+): { min: number; max: number; avg: number } | null {
+  return toStats(getRecentPeriodDurations(cycles, maxCycles));
+}
 
-  // Limit predictions to 12 months from today
-  const today = startOfDay(new Date());
-  const maxPredictionDate = addDays(today, 365);
-  if (date > maxPredictionDate) {
-    return null;
-  }
+/**
+ * Get cycle length stats (min, max, avg) from last N cycles
+ */
+export function getCycleLengthStats(
+  cycles: Cycle[],
+  maxCycles: number = MAX_CYCLES
+): { min: number; max: number; avg: number } | null {
+  return toStats(getRecentCycleLengths(cycles, maxCycles));
+}
 
-  // Get the most recent cycle
-  const sortedCycles = [...cycles].sort(
-    (a, b) => parseISO(b.period_start_date).getTime() - parseISO(a.period_start_date).getTime()
-  );
+/**
+ * Find the cycle a date belongs to
+ */
+export function findCycleForDate(date: Date, cycles: Cycle[]): Cycle | null {
+  const sorted = sortAscending(cycles);
+  const day = startOfDay(date);
 
-  const lastCycle = sortedCycles[0];
-  const lastPeriodStart = parseISO(lastCycle.period_start_date);
-
-  // Calculate how many days since last period start
-  const daysSinceLastPeriod = differenceInDays(date, lastPeriodStart);
-
-  if (daysSinceLastPeriod < 0) {
-    // Date is before the last period, not a prediction
-    return null;
-  }
-
-  // Calculate position within a projected cycle
-  const dayInCycle = daysSinceLastPeriod % cycleLength;
-
-  // Determine phase based on day in cycle
-  // Menstrual: days 0 to (periodLength - 1)
-  if (dayInCycle < averagePeriodLength) {
-    return Phase.MENSTRUAL;
-  }
-
-  // Calculate ovulation day (cycleLength - 14)
-  const ovulationDay = cycleLength - OVULATION_OFFSET;
-
-  // Ovulation day
-  if (dayInCycle === ovulationDay) {
-    return Phase.OVULATION;
-  }
-
-  // Follicular: after period, before ovulation
-  if (dayInCycle >= averagePeriodLength && dayInCycle < ovulationDay) {
-    return Phase.FOLLICULAR;
-  }
-
-  // Luteal: after ovulation until end of cycle
-  // Note: The day after ovulation is still fertile but phase is luteal
-  if (dayInCycle > ovulationDay) {
-    return Phase.LUTEAL;
+  for (let i = sorted.length - 1; i >= 0; i--) {
+    if (day >= parseISO(sorted[i].period_start_date)) {
+      return sorted[i];
+    }
   }
 
   return null;
 }
 
-
 /**
- * Get days until next predicted period (can be negative if overdue)
- * Returns { daysUntil, predictedDate, isOverdue }
+ * Get days until next predicted period (negative if overdue)
  */
 export function getDaysUntilNextPeriod(
   cycles: Cycle[],
@@ -243,17 +171,10 @@ export function getDaysUntilNextPeriod(
     return null;
   }
 
-  // Get most recent cycle
-  const sortedCycles = [...cycles].sort(
-    (a, b) => parseISO(b.period_start_date).getTime() - parseISO(a.period_start_date).getTime()
-  );
-
-  const lastCycle = sortedCycles[0];
-  const lastStart = parseISO(lastCycle.period_start_date);
+  const sorted = sortAscending(cycles);
+  const lastStart = parseISO(sorted[sorted.length - 1].period_start_date);
   const nextPeriod = addDays(lastStart, cycleLength);
-
-  const today = startOfDay(new Date());
-  const daysUntil = differenceInDays(nextPeriod, today);
+  const daysUntil = differenceInCalendarDays(nextPeriod, startOfDay(new Date()));
 
   return {
     daysUntil,
@@ -262,228 +183,207 @@ export function getDaysUntilNextPeriod(
   };
 }
 
+export interface DayInfo {
+  /** Menstrual, follicular, ovulation or luteal. Never FERTILE: see isFertile. */
+  phase: PhaseType | null;
+  /** True for every date after today */
+  isPrediction: boolean;
+  /** In the fertile window. Always false on menstrual days (menstrual wins). */
+  isFertile: boolean;
+}
+
+export interface CycleModel {
+  cycleLength: number;
+  periodLength: number;
+  getDayInfo(date: Date): DayInfo;
+}
+
+const NO_INFO: DayInfo = { phase: null, isPrediction: false, isFertile: false };
 
 /**
- * Get period duration variation (min, max, avg) from last N cycles
+ * Phase of a day given its position in a cycle.
+ * All arguments are 0-based day offsets from the period start.
  */
-export function getPeriodDurationStats(cycles: Cycle[], maxCycles: number = 6): { min: number; max: number; avg: number } | null {
-  const cyclesWithEnd = cycles.filter((c) => c.period_end_date);
-
-  if (cyclesWithEnd.length === 0) {
-    return null;
+function phaseAt(
+  dayInCycle: number,
+  periodLength: number,
+  ovulationDay: number
+): { phase: PhaseType; isFertile: boolean } {
+  if (dayInCycle < periodLength) {
+    return { phase: Phase.MENSTRUAL, isFertile: false };
   }
 
-  // Sort by date descending and take last N
-  const sortedCycles = [...cyclesWithEnd].sort(
-    (a, b) => parseISO(b.period_start_date).getTime() - parseISO(a.period_start_date).getTime()
-  );
+  const isFertile =
+    dayInCycle >= ovulationDay - FERTILE_WINDOW_BEFORE &&
+    dayInCycle <= ovulationDay + FERTILE_WINDOW_AFTER;
 
-  const recentCycles = sortedCycles.slice(0, maxCycles);
-  const durations = recentCycles.map(calculatePeriodDuration);
-
-  if (durations.length === 0) {
-    return null;
+  if (dayInCycle === ovulationDay) {
+    return { phase: Phase.OVULATION, isFertile };
   }
 
-  const sum = durations.reduce((a, b) => a + b, 0);
-
-  return {
-    min: Math.min(...durations),
-    max: Math.max(...durations),
-    avg: Math.round(sum / durations.length),
-  };
+  return { phase: dayInCycle < ovulationDay ? Phase.FOLLICULAR : Phase.LUTEAL, isFertile };
 }
 
 /**
- * Get cycle length stats (min, max, avg) from last N cycles
+ * Estimated ovulation as a 0-based day offset. The luteal phase is the
+ * stable part of the cycle, so ovulation is counted back from the next
+ * period: cycle day (length - 14), which is day 14 of a 28-day cycle.
  */
-export function getCycleLengthStats(cycles: Cycle[], maxCycles: number = 6): { min: number; max: number; avg: number } | null {
-  if (cycles.length < 2) {
-    return null;
-  }
+function estimateOvulationDay(cycleLength: number): number {
+  return Math.max(cycleLength - LUTEAL_LENGTH - 1, 0);
+}
 
-  // Sort by start date descending
-  const sortedCycles = [...cycles].sort(
-    (a, b) => parseISO(b.period_start_date).getTime() - parseISO(a.period_start_date).getTime()
-  );
+/**
+ * Single source of truth for which phase a date is in. The calendar, the
+ * "current phase" panel and the symptom statistics all read from this.
+ */
+export function createCycleModel(cycles: Cycle[], now: Date = new Date()): CycleModel {
+  const sorted = sortAscending(cycles);
+  const today = startOfDay(now);
+  const meanLength = calculateMeanCycleLength(cycles);
+  const cycleLength = Math.round(meanLength);
+  const periodLength = calculateAveragePeriodDuration(cycles) ?? DEFAULT_PERIOD_LENGTH;
+  const starts = sorted.map((c) => parseISO(c.period_start_date));
 
-  // Take up to last N+1 cycles to get N intervals
-  const recentCycles = sortedCycles.slice(0, maxCycles + 1);
-  const cycleLengths: number[] = [];
+  const lastStart = starts.length > 0 ? starts[starts.length - 1] : null;
+  const expectedNextStart = lastStart ? addDays(lastStart, cycleLength) : null;
+  // An unlogged period never appears in the past: if it is due or late,
+  // the prediction slides forward and starts tomorrow at the earliest.
+  const tomorrow = addDays(today, 1);
+  const predictionStart =
+    expectedNextStart && expectedNextStart > tomorrow ? expectedNextStart : tomorrow;
 
-  for (let i = 0; i < recentCycles.length - 1 && cycleLengths.length < maxCycles; i++) {
-    const currentStart = parseISO(recentCycles[i].period_start_date);
-    const previousStart = parseISO(recentCycles[i + 1].period_start_date);
-    const length = differenceInDays(currentStart, previousStart);
+  function recordedDayInfo(day: Date, index: number, isPrediction: boolean): DayInfo {
+    const cycle = sorted[index];
+    const start = starts[index];
+    const isLastCycle = index === sorted.length - 1;
+    const dayInCycle = differenceInCalendarDays(day, start);
 
-    if (length > 0 && length < 60) {
-      cycleLengths.push(length);
+    // Real length is known for completed cycles; use it unless the gap is
+    // implausible (a period that was never logged in between).
+    let length = cycleLength;
+    if (!isLastCycle) {
+      const actual = differenceInCalendarDays(starts[index + 1], start);
+      if (isPlausibleCycleLength(actual, meanLength)) {
+        length = actual;
+      } else if (dayInCycle >= cycleLength) {
+        // Past the end of a normal cycle inside an implausible gap: unknown
+        return NO_INFO;
+      }
+    } else if (dayInCycle >= cycleLength) {
+      // Period is due or late and not logged yet: still luteal, for up to
+      // one more cycle length. After that the data is too stale to say.
+      return dayInCycle < cycleLength * 2
+        ? { phase: Phase.LUTEAL, isPrediction, isFertile: false }
+        : NO_INFO;
     }
+
+    const ovulationDay = cycle.ovulation_date
+      ? differenceInCalendarDays(parseISO(cycle.ovulation_date), start)
+      : estimateOvulationDay(length);
+
+    return { ...phaseAt(dayInCycle, Math.min(calculatePeriodDuration(cycle), length), ovulationDay), isPrediction };
   }
 
-  if (cycleLengths.length === 0) {
-    return null;
-  }
-
-  const sum = cycleLengths.reduce((a, b) => a + b, 0);
-
-  return {
-    min: Math.min(...cycleLengths),
-    max: Math.max(...cycleLengths),
-    avg: Math.round(sum / cycleLengths.length),
-  };
-}
-
-/**
- * Find the cycle a date belongs to
- */
-export function findCycleForDate(date: Date, cycles: Cycle[]): Cycle | null {
-  const sortedCycles = [...cycles].sort(
-    (a, b) => parseISO(b.period_start_date).getTime() - parseISO(a.period_start_date).getTime()
-  );
-
-  for (let i = 0; i < sortedCycles.length; i++) {
-    const cycleStart = parseISO(sortedCycles[i].period_start_date);
-
-    // Next cycle start (or future if this is the most recent)
-    const nextCycleStart = i > 0 ? parseISO(sortedCycles[i - 1].period_start_date) : null;
-
-    if (date >= cycleStart && (!nextCycleStart || date < nextCycleStart)) {
-      return sortedCycles[i];
+  function predictedDayInfo(day: Date): DayInfo {
+    if (differenceInCalendarDays(day, today) > PREDICTION_DAYS) {
+      return NO_INFO;
     }
+
+    // Projected starts are rounded from the exact mean so they do not drift
+    const offset = differenceInCalendarDays(day, predictionStart);
+    let n = Math.floor(offset / meanLength);
+    while (Math.round((n + 1) * meanLength) <= offset) n++;
+    while (n > 0 && Math.round(n * meanLength) > offset) n--;
+
+    const cycleStartOffset = Math.round(n * meanLength);
+    const length = Math.round((n + 1) * meanLength) - cycleStartOffset;
+
+    return {
+      ...phaseAt(offset - cycleStartOffset, Math.min(periodLength, length), estimateOvulationDay(length)),
+      isPrediction: true,
+    };
   }
 
-  return null;
-}
+  function getDayInfo(date: Date): DayInfo {
+    if (!lastStart) {
+      return NO_INFO;
+    }
 
-/**
- * Get the date range for a specific phase within a cycle
- */
-function getPhaseDateRange(
-  cycle: Cycle,
-  phase: PhaseType,
-  cycleLength: number,
-  nextCycleStart?: Date
-): { start: Date; end: Date } | null {
-  const periodStart = parseISO(cycle.period_start_date);
-  const periodEnd = cycle.period_end_date
-    ? parseISO(cycle.period_end_date)
-    : addDays(periodStart, DEFAULT_PERIOD_LENGTH - 1);
+    const day = startOfDay(date);
+    const isPrediction = day > today;
 
-  const ovulationDate = addDays(periodStart, cycleLength - OVULATION_OFFSET);
-  const fertileWindow = getFertileWindow(ovulationDate);
-  const cycleEnd = nextCycleStart
-    ? addDays(nextCycleStart, -1)
-    : addDays(periodStart, cycleLength - 1);
+    if (isPrediction && day >= predictionStart) {
+      return predictedDayInfo(day);
+    }
 
-  switch (phase) {
-    case Phase.MENSTRUAL:
-      return { start: periodStart, end: periodEnd };
+    for (let i = starts.length - 1; i >= 0; i--) {
+      if (day >= starts[i]) {
+        return recordedDayInfo(day, i, isPrediction);
+      }
+    }
 
-    case Phase.FOLLICULAR:
-      const follicularStart = addDays(periodEnd, 1);
-      const follicularEnd = addDays(fertileWindow.start, -1);
-      if (follicularStart > follicularEnd) return null;
-      return { start: follicularStart, end: follicularEnd };
-
-    case Phase.FERTILE:
-      // Exclude ovulation day itself
-      return {
-        start: fertileWindow.start,
-        end: addDays(ovulationDate, -1),
-      };
-
-    case Phase.OVULATION:
-      return { start: ovulationDate, end: ovulationDate };
-
-    case Phase.LUTEAL:
-      const lutealStart = addDays(ovulationDate, 2);
-      return { start: lutealStart, end: cycleEnd };
-
-    default:
-      return null;
-  }
-}
-
-/**
- * Get all dates that fall within a specific phase for a cycle
- */
-function getPhaseDates(
-  cycle: Cycle,
-  phase: PhaseType,
-  cycleLength: number,
-  nextCycleStart?: Date
-): string[] {
-  const range = getPhaseDateRange(cycle, phase, cycleLength, nextCycleStart);
-  if (!range) return [];
-
-  const dates: string[] = [];
-  let current = range.start;
-
-  while (current <= range.end) {
-    dates.push(format(current, 'yyyy-MM-dd'));
-    current = addDays(current, 1);
+    return NO_INFO;
   }
 
-  return dates;
+  return { cycleLength, periodLength, getDayInfo };
 }
 
 export interface PhaseSymptomHistory {
   symptom: string;
+  /** Number of cycles in which the symptom was logged during the phase */
   occurrences: number;
+  /** Number of days on which it was logged during the phase */
+  days: number;
+  /** Share of the analysed cycles in which it occurred */
   percentage: number;
 }
 
 /**
- * Get symptoms that occurred during a specific phase in the last N cycles
- * Returns symptoms sorted by frequency
+ * Symptoms logged during a phase across the last N cycles, most common first.
+ * A symptom counts once per cycle, however many days it was logged.
  */
 export function getSymptomsForPhaseHistory(
   phase: PhaseType,
   cycles: Cycle[],
   symptoms: Array<{ date: string; symptom_type: string }>,
-  cycleLength: number,
-  maxCycles: number = 6
+  maxCycles: number = MAX_CYCLES
 ): PhaseSymptomHistory[] {
   if (cycles.length === 0) return [];
 
-  // Sort cycles by date descending and take last N
-  const sortedCycles = [...cycles].sort(
-    (a, b) => parseISO(b.period_start_date).getTime() - parseISO(a.period_start_date).getTime()
-  );
+  const sorted = sortAscending(cycles);
+  const recent = sorted.slice(-maxCycles);
+  const firstDate = recent[0].period_start_date;
+  const model = createCycleModel(cycles);
 
-  const recentCycles = sortedCycles.slice(0, maxCycles);
-  const symptomCounts: Record<string, number> = {};
-  let totalPhaseDays = 0;
+  const cyclesBySymptom = new Map<string, Set<number>>();
+  const daysBySymptom = new Map<string, Set<string>>();
 
-  // For each cycle, get the phase dates and count symptoms
-  for (let i = 0; i < recentCycles.length; i++) {
-    const cycle = recentCycles[i];
-    const nextCycle = i > 0 ? recentCycles[i - 1] : undefined;
-    const nextCycleStart = nextCycle ? parseISO(nextCycle.period_start_date) : undefined;
+  for (const symptom of symptoms) {
+    if (symptom.date < firstDate) continue;
 
-    const phaseDates = getPhaseDates(cycle, phase, cycleLength, nextCycleStart);
-    totalPhaseDays += phaseDates.length;
+    const date = parseISO(symptom.date);
+    const info = model.getDayInfo(date);
+    const matches = phase === Phase.FERTILE ? info.isFertile : info.phase === phase;
+    if (!matches) continue;
 
-    // Find symptoms that occurred on these dates
-    const phaseDateSet = new Set(phaseDates);
-    symptoms.forEach((symptom) => {
-      if (phaseDateSet.has(symptom.date)) {
-        symptomCounts[symptom.symptom_type] = (symptomCounts[symptom.symptom_type] || 0) + 1;
-      }
-    });
+    const cycle = findCycleForDate(date, recent);
+    if (!cycle) continue;
+
+    if (!cyclesBySymptom.has(symptom.symptom_type)) {
+      cyclesBySymptom.set(symptom.symptom_type, new Set());
+      daysBySymptom.set(symptom.symptom_type, new Set());
+    }
+    cyclesBySymptom.get(symptom.symptom_type)!.add(cycle.id);
+    daysBySymptom.get(symptom.symptom_type)!.add(symptom.date);
   }
 
-  // Convert to array and calculate percentages
-  const cycleCount = recentCycles.length;
-  const result: PhaseSymptomHistory[] = Object.entries(symptomCounts)
-    .map(([symptom, occurrences]) => ({
+  return [...cyclesBySymptom.entries()]
+    .map(([symptom, cycleIds]) => ({
       symptom,
-      occurrences,
-      // Percentage based on how many cycles had this symptom during this phase
-      percentage: Math.round((occurrences / cycleCount) * 100),
+      occurrences: cycleIds.size,
+      days: daysBySymptom.get(symptom)!.size,
+      percentage: Math.round((cycleIds.size / recent.length) * 100),
     }))
-    .sort((a, b) => b.occurrences - a.occurrences);
-
-  return result;
+    .sort((a, b) => b.occurrences - a.occurrences || b.days - a.days);
 }

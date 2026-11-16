@@ -15,22 +15,18 @@ import {
   parseISO,
   isAfter,
   startOfDay,
-  isWithinInterval,
-  addDays,
+  differenceInCalendarDays,
 } from 'date-fns';
 import { db } from '@/lib/db';
 import {
-  calculateAverageCycleLength,
-  calculateAveragePeriodDuration,
-  getPhaseForDate,
+  createCycleModel,
   findCycleForDate,
   getSymptomsForPhaseHistory,
-  getPredictedPhaseForDate,
-  getFertileWindow,
-  getOvulationDate,
   getDaysUntilNextPeriod,
+  MAX_PERIOD_LENGTH,
+  type DayInfo,
 } from '@/lib/cycle-logic';
-import type { Cycle, Symptom, PhaseType, CustomSymptomType, DayNote } from '@/types';
+import type { Cycle, Symptom, CustomSymptomType, DayNote } from '@/types';
 import { PhaseType as Phase, SymptomType } from '@/types';
 import { Input } from '@/components/ui/input';
 import {
@@ -40,6 +36,7 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer';
 import PhaseSymptoms from '@/components/PhaseSymptoms';
+import CycleStatusCard from '@/components/CycleStatusCard';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -99,138 +96,49 @@ const PERIOD_PAIN_LEVELS = [
 // Day type for radio button selection
 type DayType = 'none' | 'period_start' | 'period_end' | 'ovulation';
 
-// Helper function to check if a date is in the fertile window
-function isInFertileWindow(
-  date: Date,
-  cycles: Cycle[],
-  cycleLength: number
-): boolean {
-  const cycle = findCycleForDate(date, cycles);
-  if (!cycle) return false;
+// Shape and colours of one calendar day. Logged days are filled, predicted
+// days are dashed outlines, and period days join into a continuous band.
+function getDayShape(info: DayInfo, prev?: DayInfo, next?: DayInfo): string {
+  const { phase, isPrediction, isFertile } = info;
 
-  const ovulationDate = getOvulationDate(cycle, cycleLength);
-  const fertileWindow = getFertileWindow(ovulationDate);
+  if (phase === Phase.MENSTRUAL) {
+    const joinsPrev = prev?.phase === Phase.MENSTRUAL && prev.isPrediction === isPrediction;
+    const joinsNext = next?.phase === Phase.MENSTRUAL && next.isPrediction === isPrediction;
+    const rounding = `${joinsPrev ? '' : 'rounded-l-full'} ${joinsNext ? '' : 'rounded-r-full'}`;
 
-  return isWithinInterval(date, {
-    start: startOfDay(fertileWindow.start),
-    end: startOfDay(fertileWindow.end),
-  });
-}
-
-// Helper function to check if a predicted date is in the fertile window
-function isInPredictedFertileWindow(
-  date: Date,
-  cycles: Cycle[],
-  cycleLength: number
-): boolean {
-  // Require at least 2 cycles to show predicted fertile window (same as predicted phases)
-  if (cycles.length < 2) return false;
-
-  // Get the most recent cycle
-  const sortedCycles = [...cycles].sort(
-    (a, b) =>
-      parseISO(b.period_start_date).getTime() -
-      parseISO(a.period_start_date).getTime()
-  );
-
-  const lastCycle = sortedCycles[0];
-  const lastPeriodStart = parseISO(lastCycle.period_start_date);
-
-  // Calculate how many days since last period start
-  const daysSinceLastPeriod = Math.floor(
-    (startOfDay(date).getTime() - startOfDay(lastPeriodStart).getTime()) /
-      (1000 * 60 * 60 * 24)
-  );
-
-  if (daysSinceLastPeriod < 0) return false;
-
-  // Calculate position within a projected cycle
-  const dayInCycle = daysSinceLastPeriod % cycleLength;
-
-  // Calculate ovulation day (cycleLength - 14)
-  const ovulationDay = cycleLength - 14;
-
-  // Fertile window: 5 days before ovulation to 1 day after
-  const fertileStart = ovulationDay - 5;
-  const fertileEnd = ovulationDay + 1;
-
-  return dayInCycle >= fertileStart && dayInCycle <= fertileEnd;
-}
-
-// Helper function to get phase for a specific date
-function getDayPhaseForDate(
-  date: Date,
-  cycles: Cycle[],
-  cycleLength: number,
-  averagePeriodLength: number = 5
-): { phase: PhaseType | null; isPrediction: boolean } {
-  if (cycles.length === 0) {
-    return { phase: null, isPrediction: false };
+    if (isPrediction) {
+      return `w-full ${rounding} border-y-2 border-dashed border-phase-menstrual bg-phase-menstrual-soft text-phase-menstrual ${
+        joinsPrev ? '' : 'border-l-2'
+      } ${joinsNext ? '' : 'border-r-2'}`;
+    }
+    return `w-full ${rounding} bg-phase-menstrual text-white`;
   }
 
-  // Check if this date is in the future (after today)
-  const today = startOfDay(new Date());
-  const isFutureDate = isAfter(startOfDay(date), today);
+  const circle = 'w-10 rounded-full';
+  const fertileRing = isFertile
+    ? `border-[2.5px] border-phase-fertile ${isPrediction ? 'border-dashed' : ''}`
+    : '';
 
-  // Sort cycles by date ascending
-  const sortedCycles = [...cycles].sort(
-    (a, b) =>
-      parseISO(a.period_start_date).getTime() -
-      parseISO(b.period_start_date).getTime()
-  );
-
-  // Get the most recent cycle
-  const mostRecentCycle = sortedCycles[sortedCycles.length - 1];
-  const mostRecentStart = parseISO(mostRecentCycle.period_start_date);
-
-  // Calculate when we should start showing predictions
-  // This is after one cycle length from the most recent period start
-  const predictionCutoff = addDays(mostRecentStart, cycleLength);
-
-  // If date is beyond the prediction cutoff, use predictions (for up to 12 months)
-  if (date >= predictionCutoff && cycles.length >= 2) {
-    const predictedPhase = getPredictedPhaseForDate(
-      date,
-      cycles,
-      cycleLength,
-      averagePeriodLength
-    );
-    // Only mark as prediction (transparent) if it's a future date
-    return { phase: predictedPhase, isPrediction: isFutureDate };
+  switch (phase) {
+    case Phase.OVULATION:
+      return isPrediction
+        ? `${circle} border-2 border-dashed border-phase-ovulation-strong bg-phase-ovulation-soft text-phase-ovulation-ink`
+        : `${circle} bg-phase-ovulation-strong text-white`;
+    case Phase.FOLLICULAR:
+      return isPrediction
+        ? `${circle} bg-phase-follicular-soft/40 text-phase-follicular-ink ${
+            fertileRing || 'border-[1.5px] border-dashed border-phase-follicular'
+          }`
+        : `${circle} bg-phase-follicular-soft text-phase-follicular-ink ${fertileRing}`;
+    case Phase.LUTEAL:
+      return isPrediction
+        ? `${circle} bg-phase-luteal-soft/40 text-phase-luteal-ink ${
+            fertileRing || 'border-[1.5px] border-dashed border-phase-luteal'
+          }`
+        : `${circle} bg-phase-luteal-soft text-phase-luteal-ink ${fertileRing}`;
+    default:
+      return `${circle} ${isPrediction ? 'text-gray-400' : 'text-gray-900'}`;
   }
-
-  // Find which cycle this date belongs to
-  const cycle = findCycleForDate(date, cycles);
-
-  if (cycle) {
-    // Date belongs to a recorded cycle
-    const cycleIndex = sortedCycles.findIndex((c) => c.id === cycle.id);
-    const nextCycle = sortedCycles[cycleIndex + 1];
-    const nextCycleStart = nextCycle
-      ? parseISO(nextCycle.period_start_date)
-      : null;
-
-    const phase = getPhaseForDate(date, cycle, nextCycleStart, cycleLength);
-    // Mark as prediction (transparent) only if it's a future date
-    return {
-      phase,
-      isPrediction: isFutureDate,
-    };
-  }
-
-  // No recorded cycle - use prediction for dates before first cycle or gaps
-  if (cycles.length >= 2) {
-    const predictedPhase = getPredictedPhaseForDate(
-      date,
-      cycles,
-      cycleLength,
-      averagePeriodLength
-    );
-    // Only mark as prediction (transparent) if it's a future date
-    return { phase: predictedPhase, isPrediction: isFutureDate };
-  }
-
-  return { phase: null, isPrediction: false };
 }
 
 export default function CalendarView() {
@@ -280,8 +188,8 @@ export default function CalendarView() {
     loadData();
   }, [loadData]);
 
-  const cycleLength = calculateAverageCycleLength(cycles);
-  const periodLength = calculateAveragePeriodDuration(cycles) || 5;
+  const cycleModel = useMemo(() => createCycleModel(cycles), [cycles]);
+  const cycleLength = cycleModel.cycleLength;
 
   // Check if a date is in the future (after today)
   const isFutureDate = useCallback((date: Date): boolean => {
@@ -289,17 +197,22 @@ export default function CalendarView() {
     return isAfter(startOfDay(date), today);
   }, []);
 
-  // Get today's phase and historical symptoms for that phase
-  const todayPhase = useMemo(() => {
-    const today = new Date();
-    const result = getDayPhaseForDate(today, cycles, cycleLength, periodLength);
-    return result.phase;
-  }, [cycles, cycleLength, periodLength]);
+  // Where today sits in the cycle
+  const todayInfo = useMemo(() => cycleModel.getDayInfo(new Date()), [cycleModel]);
+  const todayPhase = todayInfo.phase;
+
+  const cycleDay = useMemo(() => {
+    const now = new Date();
+    const cycle = findCycleForDate(now, cycles);
+    return cycle
+      ? differenceInCalendarDays(now, parseISO(cycle.period_start_date)) + 1
+      : null;
+  }, [cycles]);
 
   const phaseSymptoms = useMemo(() => {
     if (!todayPhase) return [];
-    return getSymptomsForPhaseHistory(todayPhase, cycles, symptoms, cycleLength, 6);
-  }, [todayPhase, cycles, symptoms, cycleLength]);
+    return getSymptomsForPhaseHistory(todayPhase, cycles, symptoms, 6);
+  }, [todayPhase, cycles, symptoms]);
 
   const nextPeriodInfo = useMemo(() => {
     return getDaysUntilNextPeriod(cycles, cycleLength);
@@ -316,80 +229,6 @@ export default function CalendarView() {
 
     return eachDayOfInterval({ start: calendarStart, end: calendarEnd });
   }, [currentMonth]);
-
-  const getDayPhaseInfo = useCallback(
-    (date: Date): { phase: PhaseType | null; isPrediction: boolean; isFertile: boolean } => {
-      const { phase, isPrediction } = getDayPhaseForDate(date, cycles, cycleLength, periodLength);
-
-      // For recorded cycles, use actual fertile window calculation
-      // For predictions, calculate fertile window based on predicted cycle position
-      let isFertile = false;
-
-      if (!isPrediction) {
-        // Use actual cycle data for past/present days
-        isFertile = isInFertileWindow(date, cycles, cycleLength);
-      } else {
-        // For predicted days, calculate fertile window from cycle position
-        isFertile = isInPredictedFertileWindow(date, cycles, cycleLength);
-      }
-
-      return { phase, isPrediction, isFertile };
-    },
-    [cycles, cycleLength, periodLength]
-  );
-
-  // Get the background color for a phase (used for fertile days too)
-  const getPhaseBackgroundColor = (phase: PhaseType | null, isPrediction: boolean): string => {
-    // For predictions, we'll add opacity-70 separately
-    switch (phase) {
-      case Phase.MENSTRUAL:
-        return isPrediction ? 'bg-phase-menstrual opacity-70' : 'bg-phase-menstrual';
-      case Phase.FOLLICULAR:
-        return isPrediction ? 'bg-phase-follicular opacity-70' : 'bg-phase-follicular';
-      case Phase.OVULATION:
-        return isPrediction ? 'bg-phase-ovulation opacity-70' : 'bg-phase-ovulation';
-      case Phase.LUTEAL:
-        return isPrediction ? 'bg-phase-luteal opacity-70' : 'bg-phase-luteal';
-      case Phase.FERTILE:
-        return isPrediction ? 'bg-phase-follicular opacity-70' : 'bg-phase-follicular';
-      default:
-        return 'bg-white';
-    }
-  };
-
-  // Get the full styling for a calendar day
-  const getDayStyles = (
-    phase: PhaseType | null,
-    isPrediction: boolean,
-    isFertile: boolean
-  ): string => {
-    const bgColor = getPhaseBackgroundColor(phase, isPrediction);
-    const textColor = phase && phase !== Phase.FERTILE ? 'text-white' : 'text-gray-900';
-
-    // Fertile days get a thick green border
-    if (isFertile || phase === Phase.FERTILE) {
-      return `${bgColor} ${textColor} ring-6 ring-inset ring-phase-fertile`;
-    }
-
-    return `${bgColor} ${textColor}`;
-  };
-
-  const getTodayRingColor = (phase: PhaseType | null): string => {
-    switch (phase) {
-      case Phase.MENSTRUAL:
-        return 'ring-red-900';
-      case Phase.FOLLICULAR:
-        return 'ring-teal-700';
-      case Phase.OVULATION:
-        return 'ring-green-700';
-      case Phase.FERTILE:
-        return 'ring-green-700';
-      case Phase.LUTEAL:
-        return 'ring-blue-700';
-      default:
-        return 'ring-gray-400';
-    }
-  };
 
   const handleDayClick = async (date: Date) => {
     // Don't open drawer for future dates
@@ -436,40 +275,65 @@ export default function CalendarView() {
 
   const selectedDayType = getSelectedDayType();
 
+  // A period end must fall inside its cycle and within a plausible period length
+  const canEndPeriodOn = (date: Date, cycle: Cycle): boolean => {
+    const dayInCycle = differenceInCalendarDays(date, parseISO(cycle.period_start_date));
+    return dayInCycle >= 0 && dayInCycle < MAX_PERIOD_LENGTH;
+  };
+
   // Handle day type change (radio button behavior)
   const handleDayTypeChange = async (newType: DayType) => {
     if (!selectedDate) return;
 
     const dateStr = format(selectedDate, 'yyyy-MM-dd');
     const currentType = selectedDayType;
+    if (newType === currentType) return;
 
     try {
-      // First, remove any existing markers for this date
+      // Work on a local copy so the second step sees the result of the first
+      let working = cycles.map((c) => ({ ...c }));
+
+      // First, remove the existing marker for this date
       if (currentType === 'period_start') {
-        const cycle = cycles.find((c) => c.period_start_date === dateStr);
-        if (cycle) await db.deleteCycle(cycle.id);
+        const cycle = working.find((c) => c.period_start_date === dateStr);
+        if (cycle) {
+          if (
+            (cycle.period_end_date || cycle.ovulation_date) &&
+            !confirm(
+              'Removing this period start also removes the period end and ovulation day logged for this cycle. Continue?'
+            )
+          ) {
+            return;
+          }
+          await db.deleteCycle(cycle.id);
+          working = working.filter((c) => c.id !== cycle.id);
+        }
       } else if (currentType === 'period_end') {
-        const cycle = cycles.find((c) => c.period_end_date === dateStr);
-        if (cycle) await db.updateCycle(cycle.id, cycle.period_start_date, undefined, cycle.ovulation_date || undefined);
+        const cycle = working.find((c) => c.period_end_date === dateStr);
+        if (cycle) {
+          cycle.period_end_date = null;
+          await db.updateCycle(cycle.id, cycle.period_start_date, undefined, cycle.ovulation_date || undefined);
+        }
       } else if (currentType === 'ovulation') {
-        const cycle = cycles.find((c) => c.ovulation_date === dateStr);
-        if (cycle) await db.updateCycle(cycle.id, cycle.period_start_date, cycle.period_end_date || undefined, undefined);
+        const cycle = working.find((c) => c.ovulation_date === dateStr);
+        if (cycle) {
+          cycle.ovulation_date = null;
+          await db.updateCycle(cycle.id, cycle.period_start_date, cycle.period_end_date || undefined, undefined);
+        }
       }
 
       // Then, add the new marker if not 'none'
       if (newType === 'period_start') {
         await db.addCycle(dateStr);
       } else if (newType === 'period_end') {
-        // Find the cycle this date belongs to
-        const cycle = findCycleForDate(selectedDate, cycles);
-        if (cycle) {
+        const cycle = findCycleForDate(selectedDate, working);
+        if (cycle && canEndPeriodOn(selectedDate, cycle)) {
           await db.updateCycle(cycle.id, cycle.period_start_date, dateStr, cycle.ovulation_date || undefined);
         }
       } else if (newType === 'ovulation') {
-        // Find the cycle this date belongs to
-        const cycle = findCycleForDate(selectedDate, cycles);
+        const cycle = findCycleForDate(selectedDate, working);
         if (cycle) {
-          // Update cycle with the new ovulation date (replaces any existing)
+          // Replaces any ovulation day already marked in this cycle
           await db.updateCycle(cycle.id, cycle.period_start_date, cycle.period_end_date || undefined, dateStr);
         }
       }
@@ -494,23 +358,18 @@ export default function CalendarView() {
 
   const selectedDateInfo = getSelectedDateInfo();
 
-  // Check what type of entries a day has
-  const getDayEntries = useCallback(
-    (date: Date): { hasDateMarker: boolean; hasSymptoms: boolean; hasNote: boolean } => {
-      const dateStr = format(date, 'yyyy-MM-dd');
-      const hasPeriodStart = cycles.some((c) => c.period_start_date === dateStr);
-      const hasPeriodEnd = cycles.some((c) => c.period_end_date === dateStr);
-      const hasOvulation = cycles.some((c) => c.ovulation_date === dateStr);
-      const hasSymptoms = symptoms.some((s) => s.date === dateStr);
-      const hasNote = allNotes.some((n) => n.date === dateStr);
-      return {
-        hasDateMarker: hasPeriodStart || hasPeriodEnd || hasOvulation,
-        hasSymptoms,
-        hasNote,
-      };
-    },
-    [cycles, symptoms, allNotes]
-  );
+  // Dates that have anything logged (period marker, symptom or note)
+  const datesWithEntries = useMemo(() => {
+    const dates = new Set<string>();
+    cycles.forEach((c) => {
+      dates.add(c.period_start_date);
+      if (c.period_end_date) dates.add(c.period_end_date);
+      if (c.ovulation_date) dates.add(c.ovulation_date);
+    });
+    symptoms.forEach((s) => dates.add(s.date));
+    allNotes.forEach((n) => dates.add(n.date));
+    return dates;
+  }, [cycles, symptoms, allNotes]);
 
   // Toggle a symptom for the selected date
   const handleToggleSymptom = async (symptomType: string) => {
@@ -636,17 +495,11 @@ export default function CalendarView() {
   }, [customSymptomTypes]);
 
   // Check if period end button should be enabled
-  const canSetPeriodEnd = useCallback((): boolean => {
+  const canSetPeriodEnd = (): boolean => {
     if (!selectedDate) return false;
-
-    // Find the cycle this date belongs to
     const cycle = findCycleForDate(selectedDate, cycles);
-    if (!cycle) return false;
-
-    // Can set period end if the selected date is on or after the cycle start
-    const cycleStart = parseISO(cycle.period_start_date);
-    return selectedDate >= cycleStart;
-  }, [selectedDate, cycles]);
+    return cycle !== null && canEndPeriodOn(selectedDate, cycle);
+  };
 
   // Check if ovulation can be set (must be within a cycle)
   const canSetOvulation = useCallback((): boolean => {
@@ -685,6 +538,9 @@ export default function CalendarView() {
   }, [currentMonth]);
 
   const calendarDays = getCalendarDays();
+  const dayInfos = calendarDays.map((day) => cycleModel.getDayInfo(day));
+  const today = new Date();
+  const isViewingToday = isSameMonth(currentMonth, today);
 
   if (isLoading) {
     return (
@@ -696,27 +552,51 @@ export default function CalendarView() {
 
   return (
     <div className="flex flex-col p-4">
+      {/* Cycle status */}
+      {cycles.length > 0 && (
+        <CycleStatusCard
+          phase={todayPhase}
+          isFertile={todayInfo.isFertile}
+          cycleDay={cycleDay}
+          nextPeriodInfo={nextPeriodInfo}
+        />
+      )}
+
       {/* Month Navigation */}
-      <div className="mb-4 flex items-center justify-between">
-        <button
-          onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-          className="rounded-full p-2 hover:bg-gray-100"
-        >
-          <ChevronLeftIcon />
-        </button>
-        <h2 className="text-xl font-semibold text-gray-900">
+      <div className="mb-3 flex items-center gap-1">
+        <h2 className="flex-1 whitespace-nowrap text-lg font-semibold text-gray-900">
           {format(currentMonth, 'MMMM yyyy')}
         </h2>
         <button
+          onClick={() => setCurrentMonth(new Date())}
+          aria-label="Jump to today"
+          className={`flex h-11 items-center gap-1.5 rounded-full border-2 px-3 text-sm font-semibold transition-colors ${
+            isViewingToday
+              ? 'border-gray-200 text-gray-400'
+              : 'border-brand-red bg-brand-red text-white'
+          }`}
+        >
+          <TodayIcon />
+          Today
+        </button>
+        <button
+          onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
+          aria-label="Previous month"
+          className="flex h-11 w-10 items-center justify-center rounded-full text-gray-700 hover:bg-gray-100"
+        >
+          <ChevronLeftIcon />
+        </button>
+        <button
           onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-          className="rounded-full p-2 hover:bg-gray-100"
+          aria-label="Next month"
+          className="flex h-11 w-10 items-center justify-center rounded-full text-gray-700 hover:bg-gray-100"
         >
           <ChevronRightIcon />
         </button>
       </div>
 
       {/* Weekday Headers */}
-      <div className="mb-2 grid grid-cols-7 gap-1">
+      <div className="mb-1 grid grid-cols-7">
         {WEEKDAYS.map((day) => (
           <div
             key={day}
@@ -729,56 +609,46 @@ export default function CalendarView() {
 
       {/* Calendar Grid */}
       <div
-        className="grid grid-cols-7 gap-1"
+        className="grid grid-cols-7 gap-y-1.5"
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
       >
-        {calendarDays.map((day) => {
-          const isToday = isSameDay(day, new Date());
+        {calendarDays.map((day, index) => {
+          const isToday = isSameDay(day, today);
           const isFuture = isFutureDate(day);
-          // Always calculate phase info for all days (including prev/next month)
-          const { phase, isPrediction, isFertile } = getDayPhaseInfo(day);
-          // Apply phase colors to all days, but mute non-current-month days
-          const baseStyles = getDayStyles(phase, isPrediction, isFertile);
-          const dayStyles =  baseStyles
-          const todayRingColor = getTodayRingColor(phase);
-          const dayEntries = !isFuture ? getDayEntries(day) : null;
+          const shape = getDayShape(dayInfos[index], dayInfos[index - 1], dayInfos[index + 1]);
+          const hasEntry = datesWithEntries.has(format(day, 'yyyy-MM-dd'));
 
           return (
             <button
               key={day.toISOString()}
               onClick={() => handleDayClick(day)}
               disabled={isFuture}
-              className={`relative flex h-12 items-center justify-center rounded-lg text-sm font-medium transition-colors ${dayStyles} ${
-                isFuture ? 'cursor-not-allowed opacity-70' : ''
-              }`}
+              aria-label={format(day, 'EEEE, d MMMM yyyy')}
+              aria-current={isToday ? 'date' : undefined}
+              className={`relative flex h-12 items-center justify-center text-sm ${
+                isToday ? 'font-bold' : 'font-medium'
+              } ${isFuture ? 'cursor-not-allowed' : ''}`}
             >
-              {isToday ? (
-                <span
-                  className={`flex h-6 w-6 items-center justify-center rounded-full ring-6 ${todayRingColor}`}
-                >
-                  {format(day, 'd')}
-                </span>
-              ) : (
-                format(day, 'd')
-              )}
-              {/* Top left: Circle for date markers (start, end, ovulation) */}
-              {dayEntries?.hasDateMarker && (
-                <span className="absolute left-1 top-1">
-                  <CircleIcon />
-                </span>
-              )}
-              {/* Top right: Star for symptoms */}
-              {dayEntries?.hasSymptoms && (
-                <span className="absolute right-1 top-1">
-                  <StarIcon />
-                </span>
-              )}
-              {/* Bottom right: Pen for notes */}
-              {dayEntries?.hasNote && (
-                <span className="absolute bottom-1 right-1">
-                  <PenIcon />
-                </span>
+              <span className={`relative flex h-10 items-center justify-center ${shape}`}>
+                {format(day, 'd')}
+                {/* Dot: something is logged on this day */}
+                {hasEntry && (
+                  <span
+                    className={`absolute left-1/2 h-1 w-1 -translate-x-1/2 rounded-full bg-current ${
+                      isToday ? 'top-1' : 'bottom-1'
+                    }`}
+                  />
+                )}
+              </span>
+              {/* Today: dark ring with a white gap, plus a label */}
+              {isToday && (
+                <>
+                  <span className="pointer-events-none absolute h-10 w-10 rounded-full ring-[3px] ring-ink ring-offset-1 ring-offset-white" />
+                  <span className="pointer-events-none absolute -bottom-1.5 z-10 rounded-full bg-ink px-1.5 text-[10px] font-semibold leading-4 text-white">
+                    Today
+                  </span>
+                </>
               )}
             </button>
           );
@@ -796,25 +666,22 @@ export default function CalendarView() {
       )}
 
       {/* Phase Legend */}
-      <div className="mt-6 grid grid-cols-2 gap-2 text-xs">
-        <LegendItem color="bg-phase-menstrual" label="Menstrual" />
-        <LegendItem color="bg-phase-follicular" label="Follicular" />
-        <LegendItem
-          color="ring-4 ring-inset ring-phase-fertile"
-          label="Fertile"
-        />
-        <LegendItem color="bg-phase-ovulation" label="Ovulation" />
-        <LegendItem color="bg-phase-luteal" label="Luteal" />
+      <div className="mt-5 flex flex-wrap gap-x-4 gap-y-2 text-xs">
+        <LegendItem swatch="bg-phase-menstrual" label="Period" />
+        <LegendItem swatch="border border-phase-follicular bg-phase-follicular-soft" label="Follicular" />
+        <LegendItem swatch="bg-phase-ovulation-strong" label="Ovulation" />
+        <LegendItem swatch="border border-phase-luteal bg-phase-luteal-soft" label="Luteal" />
+        <LegendItem swatch="border-2 border-phase-fertile" label="Fertile" />
+        <LegendItem swatch="border-[1.5px] border-dashed border-gray-500" label="Predicted" />
       </div>
 
-      {/* Phase Info Panel - shows current phase, next period, and common symptoms */}
+      {/* Common symptoms for the current phase */}
       {cycles.length > 0 && (
         <PhaseSymptoms
           phase={todayPhase}
           symptoms={phaseSymptoms}
           customSymptomTypes={customSymptomTypes}
           cyclesAnalyzed={cyclesAnalyzed}
-          nextPeriodInfo={nextPeriodInfo}
         />
       )}
 
@@ -1097,12 +964,32 @@ export default function CalendarView() {
   );
 }
 
-function LegendItem({ color, label }: { color: string; label: string }) {
+function LegendItem({ swatch, label }: { swatch: string; label: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <div className={`h-4 w-4 rounded ${color}`} />
+    <div className="flex items-center gap-1.5">
+      <div className={`h-4 w-4 rounded-full ${swatch}`} />
       <span className="text-gray-600">{label}</span>
     </div>
+  );
+}
+
+function TodayIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      fill="none"
+      viewBox="0 0 24 24"
+      strokeWidth={2}
+      stroke="currentColor"
+      className="h-4 w-4"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
+      />
+      <circle cx="12" cy="15" r="1.75" fill="currentColor" stroke="none" />
+    </svg>
   );
 }
 
@@ -1144,20 +1031,6 @@ function ChevronRightIcon() {
   );
 }
 
-function PenIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      className="h-3 w-3 opacity-60"
-    >
-      <path d="m5.433 13.917 1.262-3.155A4 4 0 0 1 7.58 9.42l6.92-6.918a2.121 2.121 0 0 1 3 3l-6.92 6.918c-.383.383-.84.685-1.343.886l-3.154 1.262a.5.5 0 0 1-.65-.65Z" />
-      <path d="M3.5 5.75c0-.69.56-1.25 1.25-1.25H10A.75.75 0 0 0 10 3H4.75A2.75 2.75 0 0 0 2 5.75v9.5A2.75 2.75 0 0 0 4.75 18h9.5A2.75 2.75 0 0 0 17 15.25V10a.75.75 0 0 0-1.5 0v5.25c0 .69-.56 1.25-1.25 1.25h-9.5c-.69 0-1.25-.56-1.25-1.25v-9.5Z" />
-    </svg>
-  );
-}
-
 function PlusIcon() {
   return (
     <svg
@@ -1167,36 +1040,6 @@ function PlusIcon() {
       className="h-4 w-4"
     >
       <path d="M10.75 4.75a.75.75 0 0 0-1.5 0v4.5h-4.5a.75.75 0 0 0 0 1.5h4.5v4.5a.75.75 0 0 0 1.5 0v-4.5h4.5a.75.75 0 0 0 0-1.5h-4.5v-4.5Z" />
-    </svg>
-  );
-}
-
-function CircleIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      className="h-3 w-3 opacity-60"
-    >
-      <circle cx="10" cy="10" r="6" />
-    </svg>
-  );
-}
-
-function StarIcon() {
-  return (
-    <svg
-      xmlns="http://www.w3.org/2000/svg"
-      viewBox="0 0 20 20"
-      fill="currentColor"
-      className="h-3 w-3 opacity-60"
-    >
-      <path
-        fillRule="evenodd"
-        d="M10.868 2.884c-.321-.772-1.415-.772-1.736 0l-1.83 4.401-4.753.381c-.833.067-1.171 1.107-.536 1.651l3.62 3.102-1.106 4.637c-.194.813.691 1.456 1.405 1.02L10 15.591l4.069 2.485c.713.436 1.598-.207 1.404-1.02l-1.106-4.637 3.62-3.102c.635-.544.297-1.584-.536-1.65l-4.752-.382-1.831-4.401Z"
-        clipRule="evenodd"
-      />
     </svg>
   );
 }

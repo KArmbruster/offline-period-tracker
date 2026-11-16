@@ -84,8 +84,8 @@ export default function UserGuide({ isOpen, onClose }: UserGuideProps) {
               />
               <InfoCard
                 title="Cycle Predictions"
-                description="After 2+ cycles, the app predicts future phases based on your averages."
-                howTo="Future dates on the calendar show predicted phases (slightly transparent)."
+                description="From your first logged period on, the app predicts future phases based on your averages."
+                howTo="Future dates on the calendar show predicted phases with a dashed outline."
               />
               <InfoCard
                 title="Insights"
@@ -121,11 +121,11 @@ export default function UserGuide({ isOpen, onClose }: UserGuideProps) {
               />
               <InfoCard
                 title="Ovulation Date"
-                description="If you manually log ovulation, that date is used. Otherwise, ovulation is estimated as 14 days before the next period is expected (cycle length minus 14 days from period start)."
+                description="If you manually log ovulation, that date is used. Otherwise, ovulation is estimated as cycle day (cycle length minus 14), which is day 14 of a 28-day cycle. Past cycles use their own real length."
               />
               <InfoCard
                 title="Fertile Window"
-                description="The fertile window spans from 5 days before ovulation to 1 day after ovulation (7 days total). This is shown as a green ring around the underlying phase color."
+                description="The fertile window spans from 5 days before ovulation to 1 day after ovulation (7 days total). This is shown as a green ring around the underlying phase color. It is an estimate and not suitable as contraception."
               />
               <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
                 <h4 className="font-medium text-gray-900">Phase Definitions</h4>
@@ -138,7 +138,7 @@ export default function UserGuide({ isOpen, onClose }: UserGuideProps) {
               </div>
               <InfoCard
                 title="Future Predictions"
-                description="After logging 2 or more cycles, the app projects phases up to 12 months into the future. Predictions use your average cycle length and period duration. Future dates appear slightly transparent to indicate they are estimates, not recorded data."
+                description="The app projects phases up to 12 months into the future, using your average cycle length and period duration (28 and 5 days until you have logged enough). Future dates have a dashed outline to show they are estimates, not recorded data. If a period is late, the prediction moves forward day by day until you log it."
               />
             </div>
           </section>
@@ -149,31 +149,31 @@ export default function UserGuide({ isOpen, onClose }: UserGuideProps) {
               Calendar Colors
             </h3>
             <div className="space-y-4">
-              <LegendCard color="bg-phase-menstrual" title="Menstrual Phase" description="Red indicates days during your period." />
-              <LegendCard color="bg-phase-follicular" title="Follicular Phase" description="Teal indicates days after your period ends until ovulation." />
-              <LegendCard color="ring-4 ring-inset ring-phase-fertile" title="Fertile Days" description="Green ring overlay indicates your fertile window." />
-              <LegendCard color="bg-phase-ovulation" title="Ovulation Day" description="Green indicates the estimated or logged ovulation day." />
-              <LegendCard color="bg-phase-luteal" title="Luteal Phase" description="Blue indicates days after ovulation until your next period." />
+              <LegendCard color="bg-phase-menstrual" title="Menstrual Phase" description="A red band marks the days of your period." />
+              <LegendCard color="border border-phase-follicular bg-phase-follicular-soft" title="Follicular Phase" description="Amber indicates days after your period ends until ovulation." />
+              <LegendCard color="ring-2 ring-inset ring-phase-fertile" title="Fertile Days" description="A green ring indicates your estimated fertile window." />
+              <LegendCard color="bg-phase-ovulation-strong" title="Ovulation Day" description="Solid green indicates the estimated or logged ovulation day." />
+              <LegendCard color="border border-phase-luteal bg-phase-luteal-soft" title="Luteal Phase" description="Teal indicates days after ovulation until your next period." />
             </div>
           </section>
 
           {/* Icons Legend */}
           <section>
             <h3 className="mb-3 text-base font-semibold text-gray-900">
-              Calendar Icons
+              Calendar Markers
             </h3>
             <div className="space-y-4">
               <InfoCard
-                title="Circle (top-left)"
-                description="Date has a marker (period start, end, or ovulation)."
+                title="Dark ring with Today label"
+                description="Marks today's date. Use the Today button above the calendar to jump back to it."
               />
               <InfoCard
-                title="Star (top-right)"
-                description="Symptoms logged for this day."
+                title="Dashed outline"
+                description="A predicted day, not recorded data."
               />
               <InfoCard
-                title="Pen (bottom-right)"
-                description="Note saved for this day."
+                title="Small dot"
+                description="Something is logged for this day: a period start or end, ovulation, symptoms, or a note."
               />
             </div>
           </section>

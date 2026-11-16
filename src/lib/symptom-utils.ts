@@ -63,10 +63,10 @@ export function getPainLevel(symptom: string): number {
 }
 
 /**
- * Calculate average pain from symptom history
+ * Calculate average pain from symptom history, weighted by logged days
  */
 export function calculateAveragePain(
-  symptoms: Array<{ symptom: string; occurrences: number }>
+  symptoms: Array<{ symptom: string; days: number }>
 ): number | null {
   const painSymptoms = symptoms.filter((s) => isPeriodPainSymptom(s.symptom));
   if (painSymptoms.length === 0) return null;
@@ -74,10 +74,10 @@ export function calculateAveragePain(
   let totalPain = 0;
   let totalOccurrences = 0;
 
-  painSymptoms.forEach(({ symptom, occurrences }) => {
+  painSymptoms.forEach(({ symptom, days }) => {
     const level = getPainLevel(symptom);
-    totalPain += level * occurrences;
-    totalOccurrences += occurrences;
+    totalPain += level * days;
+    totalOccurrences += days;
   });
 
   return Math.round((totalPain / totalOccurrences) * 10) / 10;
