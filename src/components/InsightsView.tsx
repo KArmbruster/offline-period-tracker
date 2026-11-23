@@ -6,14 +6,21 @@ import { ChartColumn } from 'lucide-react';
 import { db } from '@/lib/db';
 import PainBar from '@/components/PainBar';
 import {
+  getActivityStatsByPhase,
   getCycleHistory,
   getCycleLengthStats,
   getPeriodDurationStats,
   getSymptomsForPhaseHistory,
   type CycleHistoryEntry,
+  type PhaseActivityStats,
   type PhaseSymptomHistory,
 } from '@/lib/cycle-logic';
-import { getSymptomLabel, isPeriodPainSymptom, calculateAveragePain } from '@/lib/symptom-utils';
+import {
+  getSymptomLabel,
+  isActivityEntry,
+  isPeriodPainSymptom,
+  calculateAveragePain,
+} from '@/lib/symptom-utils';
 import type { Cycle, Symptom, CustomSymptomType } from '@/types';
 import { PhaseType } from '@/types';
 
@@ -84,7 +91,10 @@ export default function InsightsView() {
     return result;
   }, [cycles, symptoms]);
 
-  const hasAnySymptoms = symptoms.length > 0;
+  const activityStats = useMemo(() => getActivityStatsByPhase(cycles, symptoms, 6), [cycles, symptoms]);
+
+  const hasAnySymptoms = symptoms.some((s) => !isActivityEntry(s.symptom_type));
+  const hasAnyActivity = symptoms.some((s) => isActivityEntry(s.symptom_type));
 
   if (isLoading) {
     return (
@@ -195,6 +205,80 @@ export default function InsightsView() {
           })}
         </div>
       </section>
+
+      {/* Sport and sex by phase */}
+      <section className="mb-6">
+        <h2 className="mb-1 text-lg font-semibold text-gray-900">Sport and sex by phase</h2>
+        <p className="mb-3 text-sm text-gray-500">Average per cycle, last 6 cycles</p>
+        {hasAnyActivity ? (
+          <ActivityTable stats={activityStats} />
+        ) : (
+          <p className="rounded-2xl border border-gray-200 p-4 text-sm text-gray-500">
+            Log sport or sex in the calendar to see them here
+          </p>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function formatOne(value: number | null): string {
+  return value === null
+    ? '–'
+    : value.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 1 });
+}
+
+/**
+ * One row per phase: sport sessions per cycle, average strength (1-5, where
+ * 3 is normal) and days with sex per cycle.
+ */
+function ActivityTable({ stats }: { stats: PhaseActivityStats[] }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-gray-200">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-gray-200 bg-gray-50 text-xs text-gray-500">
+            <th scope="col" className="px-3 py-2 text-left font-medium">Phase</th>
+            <th scope="col" className="px-2 py-2 text-right font-medium">Sport</th>
+            <th scope="col" className="px-2 py-2 text-right font-medium">Strength</th>
+            <th scope="col" className="px-3 py-2 text-right font-medium">Sex</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stats.map((row) => {
+            const info = PHASE_INFO[row.phase];
+            return (
+              <tr key={row.phase} className="border-b border-gray-100 last:border-0">
+                <th scope="row" className="px-3 py-3 text-left font-normal">
+                  <span className="flex items-center gap-2 text-gray-900">
+                    <span className={`h-3 w-3 shrink-0 rounded-full ${info.color}`} />
+                    {info.name}
+                  </span>
+                </th>
+                <td className="px-2 py-3 text-right tabular-nums text-gray-900">
+                  {formatOne(row.sportPerCycle)}
+                </td>
+                <td className="px-2 py-3 text-right tabular-nums text-gray-900">
+                  {row.averageStrength === null ? (
+                    <span className="text-gray-400">–</span>
+                  ) : (
+                    <>
+                      {formatOne(row.averageStrength)}
+                      <span className="text-gray-400"> /5</span>
+                    </>
+                  )}
+                </td>
+                <td className="px-3 py-3 text-right tabular-nums text-gray-900">
+                  {formatOne(row.sexPerCycle)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500">
+        Sport: sessions per cycle. Strength: 1 weaker than usual, 3 normal, 5 stronger. Sex: days per cycle.
+      </p>
     </div>
   );
 }

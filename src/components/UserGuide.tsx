@@ -78,6 +78,16 @@ export default function UserGuide({ isOpen, onClose }: UserGuideProps) {
                 howTo="In the date drawer, tap 'Add custom symptom' and choose a category."
               />
               <InfoCard
+                title="Track Sport"
+                description="Log the sports you did and how strong you felt, from 1 (weaker than usual) through 3 (normal) to 5 (stronger than usual)."
+                howTo="Tap a date and pick one or more sports in the Sport section. The strength scale appears once a sport is selected. Tap 'Add custom sport' to add your own."
+              />
+              <InfoCard
+                title="Track Sex"
+                description="Note the days you had sex."
+                howTo="Tap a date, then tap 'I had sex today' in the Sex section. Tap it again to remove it."
+              />
+              <InfoCard
                 title="Daily Notes"
                 description="Add free-text notes to any day."
                 howTo="Tap a date, scroll down to the Note section, and type your note."
@@ -89,7 +99,7 @@ export default function UserGuide({ isOpen, onClose }: UserGuideProps) {
               />
               <InfoCard
                 title="Insights"
-                description="View your cycle statistics and common symptoms by phase."
+                description="View your cycle statistics, common symptoms by phase, and average sport, strength and sex per phase."
                 howTo="Tap the Insights tab at the bottom."
               />
               <InfoCard

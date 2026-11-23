@@ -3,7 +3,7 @@
  * Used for development and PWA mode when native SQLite is not available
  */
 
-import type { Cycle, Symptom, CustomSymptomType, DayNote } from '@/types';
+import type { Cycle, Symptom, CustomSymptomType, CustomTypeCategory, DayNote } from '@/types';
 
 const STORAGE_KEYS = {
   CYCLES: 'pt_cycles',
@@ -162,7 +162,7 @@ class WebDatabaseService {
     return types.sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  async addCustomSymptomType(name: string, category: 'physical' | 'mood'): Promise<number> {
+  async addCustomSymptomType(name: string, category: CustomTypeCategory): Promise<number> {
     const types = this.getStoredData<CustomSymptomType>(STORAGE_KEYS.CUSTOM_SYMPTOM_TYPES);
 
     // Check if already exists

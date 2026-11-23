@@ -17,7 +17,7 @@ import {
   startOfDay,
   differenceInCalendarDays,
 } from 'date-fns';
-import { Droplet, DropletOff, Egg } from 'lucide-react';
+import { Droplet, DropletOff, Egg, Heart } from 'lucide-react';
 import { db } from '@/lib/db';
 import {
   createCycleModel,
@@ -38,7 +38,16 @@ import {
 } from '@/components/ui/drawer';
 import PhaseSymptoms from '@/components/PhaseSymptoms';
 import CycleStatusCard from '@/components/CycleStatusCard';
-import { getPainLevel } from '@/lib/symptom-utils';
+import {
+  customSportType,
+  getPainLevel,
+  getSportScore,
+  isSportScore,
+  isSportSession,
+  sportScoreType,
+  SPORT_OPTIONS,
+  SPORT_SCORE_LABELS,
+} from '@/lib/symptom-utils';
 
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
@@ -159,6 +168,10 @@ export default function CalendarView() {
   const [newSymptomCategory, setNewSymptomCategory] = useState<'physical' | 'mood' | null>(null);
   const [newSymptomName, setNewSymptomName] = useState('');
 
+  // Custom sport creation state
+  const [isCreatingCustomSport, setIsCreatingCustomSport] = useState(false);
+  const [newSportName, setNewSportName] = useState('');
+
   // Day note state
   const [dayNote, setDayNote] = useState<DayNote | null>(null);
   const [noteText, setNoteText] = useState('');
@@ -266,6 +279,8 @@ export default function CalendarView() {
     setIsCreatingCustomSymptom(false);
     setNewSymptomCategory(null);
     setNewSymptomName('');
+    setIsCreatingCustomSport(false);
+    setNewSportName('');
 
     // Load note for this date
     try {
@@ -485,6 +500,69 @@ export default function CalendarView() {
     }
   };
 
+  const selectedSportCount = selectedDateInfo.symptoms.filter((s) => isSportSession(s.symptom_type)).length;
+  const selectedSportScore = selectedDateInfo.symptoms.reduce(
+    (score, s) => getSportScore(s.symptom_type) || score,
+    0
+  );
+
+  // Sports are multi choice. Removing the last sport of the day also removes
+  // the strength score, which only makes sense together with a sport.
+  const handleToggleSport = async (sportType: string) => {
+    if (!selectedDate || isFutureDate(selectedDate)) return;
+
+    try {
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      const existing = selectedDateInfo.symptoms.find((s) => s.symptom_type === sportType);
+
+      if (existing) {
+        await db.deleteSymptom(existing.id);
+        if (selectedSportCount === 1) {
+          for (const s of selectedDateInfo.symptoms.filter((e) => isSportScore(e.symptom_type))) {
+            await db.deleteSymptom(s.id);
+          }
+        }
+      } else {
+        await db.addSymptom(dateStr, sportType);
+      }
+      await loadData();
+    } catch (error) {
+      console.error('Failed to toggle sport:', error);
+    }
+  };
+
+  // Strength score is one choice per day; tapping the active one clears it
+  const handleSportScoreChange = async (score: number) => {
+    if (!selectedDate || isFutureDate(selectedDate)) return;
+
+    try {
+      const dateStr = format(selectedDate, 'yyyy-MM-dd');
+      for (const s of selectedDateInfo.symptoms.filter((e) => isSportScore(e.symptom_type))) {
+        await db.deleteSymptom(s.id);
+      }
+      if (score !== selectedSportScore) {
+        await db.addSymptom(dateStr, sportScoreType(score));
+      }
+      await loadData();
+    } catch (error) {
+      console.error('Failed to update strength score:', error);
+    }
+  };
+
+  const handleCreateCustomSport = async () => {
+    const name = newSportName.trim();
+    if (!name) return;
+
+    try {
+      await db.addCustomSymptomType(name, 'sport');
+      await loadData();
+      setIsCreatingCustomSport(false);
+      setNewSportName('');
+    } catch (error) {
+      console.error('Failed to create custom sport:', error);
+    }
+  };
+
   // Tapping the active day type again clears it
   const toggleDayType = (type: DayType) =>
     handleDayTypeChange(selectedDayType === type ? 'none' : type);
@@ -553,6 +631,7 @@ export default function CalendarView() {
     return {
       physical: customSymptomTypes.filter((c) => c.category === 'physical'),
       mood: customSymptomTypes.filter((c) => c.category === 'mood'),
+      sport: customSymptomTypes.filter((c) => c.category === 'sport'),
     };
   }, [customSymptomTypes]);
 
@@ -972,6 +1051,131 @@ export default function CalendarView() {
                 </div>
               )}
             </div>
+
+            {/* Sport: any number of sports, plus how strong it felt */}
+            <SheetSection title="Sport">
+              <div className="flex flex-wrap gap-2">
+                {SPORT_OPTIONS.map(({ type, label }) => (
+                  <SymptomChip
+                    key={type}
+                    label={label}
+                    selected={isSymptomSelected(type)}
+                    onClick={() => handleToggleSport(type)}
+                  />
+                ))}
+                {customSymptomsByCategory.sport.map((custom) => (
+                  <SymptomChip
+                    key={`custom-sport-${custom.id}`}
+                    label={custom.name}
+                    selected={isSymptomSelected(customSportType(custom.id))}
+                    onClick={() => handleToggleSport(customSportType(custom.id))}
+                  />
+                ))}
+              </div>
+
+              {/* Add custom sport */}
+              <div className="mt-2">
+                {!isCreatingCustomSport ? (
+                  <button
+                    onClick={() => setIsCreatingCustomSport(true)}
+                    className="flex h-11 items-center gap-1 rounded-full border border-dashed border-brand-red/50 px-4 text-sm font-medium text-brand-red"
+                  >
+                    <PlusIcon />
+                    Add custom sport
+                  </button>
+                ) : (
+                  <div className="rounded-xl border border-gray-200 p-3">
+                    <p className="mb-2 text-sm text-gray-600">New sport</p>
+                    <div className="flex gap-2">
+                      <Input
+                        type="text"
+                        value={newSportName}
+                        onChange={(e) => setNewSportName(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && handleCreateCustomSport()}
+                        placeholder="Sport name"
+                        className="h-11 flex-1 text-base"
+                        autoFocus
+                      />
+                      <button
+                        onClick={handleCreateCustomSport}
+                        disabled={!newSportName.trim()}
+                        className="h-11 rounded-lg bg-brand-red px-4 text-sm font-medium text-white disabled:opacity-50"
+                      >
+                        Add
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setIsCreatingCustomSport(false);
+                        setNewSportName('');
+                      }}
+                      className="mt-1 h-11 px-1 text-sm text-gray-500"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Strength score, only once a sport is logged */}
+              {selectedSportCount > 0 && (
+                <div className="mt-4">
+                  <div className="mb-2 flex items-baseline justify-between">
+                    <h4 className="text-sm font-medium text-gray-500">How strong did you feel?</h4>
+                    {selectedSportScore > 0 && (
+                      <span className="text-sm font-semibold text-gray-900">
+                        {SPORT_SCORE_LABELS[selectedSportScore]}
+                      </span>
+                    )}
+                  </div>
+                  <div
+                    className="grid grid-cols-5 overflow-hidden rounded-xl border border-gray-200"
+                    role="group"
+                    aria-label="Strength compared to usual, 1 weaker to 5 stronger"
+                  >
+                    {[1, 2, 3, 4, 5].map((score, index) => (
+                      <button
+                        key={score}
+                        onClick={() => handleSportScoreChange(score)}
+                        aria-pressed={selectedSportScore === score}
+                        aria-label={`${score}: ${SPORT_SCORE_LABELS[score]}`}
+                        className={`h-11 text-sm transition-colors ${index > 0 ? 'border-l border-gray-200' : ''} ${
+                          selectedSportScore === score
+                            ? 'bg-brand-red font-semibold text-white'
+                            : 'bg-white text-gray-700'
+                        }`}
+                      >
+                        {score}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-1 flex justify-between text-xs text-gray-400">
+                    <span>Weaker</span>
+                    <span>Normal</span>
+                    <span>Stronger</span>
+                  </div>
+                </div>
+              )}
+            </SheetSection>
+
+            {/* Sexual activity */}
+            <SheetSection title="Sex">
+              <button
+                onClick={() => handleToggleSymptom(SymptomType.SEX)}
+                aria-pressed={isSymptomSelected(SymptomType.SEX)}
+                className={`flex h-12 w-full items-center justify-center gap-2 rounded-xl border text-sm font-medium transition-colors ${
+                  isSymptomSelected(SymptomType.SEX)
+                    ? 'border-brand-red bg-brand-red text-white'
+                    : 'border-gray-200 text-gray-700'
+                }`}
+              >
+                <Heart
+                  className="h-5 w-5"
+                  fill={isSymptomSelected(SymptomType.SEX) ? 'currentColor' : 'none'}
+                />
+                I had sex today
+              </button>
+            </SheetSection>
 
             {/* Notes Section */}
             <SheetSection title="Note">

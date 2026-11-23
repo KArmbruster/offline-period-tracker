@@ -103,7 +103,7 @@ There is no PIN lock or app lock; it was removed. `crypto.ts` and the PIN screen
 |--------|------|-------------|
 | id | INTEGER | Primary key |
 | name | TEXT | User-defined symptom name (unique) |
-| category | TEXT | 'physical' or 'mood' |
+| category | TEXT | 'physical', 'mood' or 'sport' |
 | created_at | TEXT | Timestamp |
 
 #### `day_notes`
@@ -219,6 +219,8 @@ Tap any non-future date to open the bottom sheet. Header shows the date plus "To
   - Physical symptoms (including custom)
   - Mood symptoms (including custom)
   - "Add custom symptom" option
+- **Sport**: chips for built-in and custom sports (multi choice, "Add custom sport"); once a sport is selected, a 1-5 strength scale appears (1 weaker than usual, 3 normal, 5 stronger). Removing the last sport also clears the score
+- **Sex**: one toggle, "I had sex today"
 - **Notes**: Free-form text area for day notes
 - Icons come from `lucide-react`; no emojis
 
@@ -361,6 +363,7 @@ npx cap run android      # Run on Android device/emulator
 - [x] Day notes
 - [x] Insights view with statistics
 - [x] Common symptoms by phase
+- [x] Sport (with strength score) and sex tracking, averaged per phase in Insights
 - [x] Cycle status card (cycle day, current phase, next period countdown) and phase symptoms
 - [x] Settings page
 - [x] User guide with privacy info
@@ -368,3 +371,16 @@ npx cap run android      # Run on Android device/emulator
 - [x] PWA configuration
 - [x] Mobile safe area handling (browser chrome)
 - [ ] Capacitor mobile builds (web bundle loads from the root; not yet run on a device)
+
+## Sport and Sex Tracking
+Stored as rows in the `symptoms` table, so export/import and the calendar dot work without schema changes:
+
+| Entry | `symptom_type` |
+|-------|----------------|
+| Built-in sport | `sport_running`, `sport_cycling`, `sport_swimming`, `sport_strength_training`, `sport_yoga`, `sport_pilates`, `sport_hiking` (`SportType` enum) |
+| Custom sport | `sport_custom_<id>` (id from `custom_symptom_types` with category `sport`) |
+| Strength score | `sport_score_1` to `sport_score_5`, one per day |
+| Sex | `sex` |
+
+- `isActivityEntry()` in `symptom-utils.ts` identifies these; `getSymptomsForPhaseHistory` skips them so they never show up as symptoms
+- Insights "Sport and sex by phase" uses `getActivityStatsByPhase()`: per phase, sport sessions per cycle, average strength score, and days with sex per cycle, across the last 6 cycles. Counts are divided by the number of cycles that have reached that phase, so the current cycle only counts for phases it has been through

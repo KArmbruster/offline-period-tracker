@@ -1,4 +1,4 @@
-import type { Cycle, Symptom, CustomSymptomType, DayNote } from '@/types';
+import type { Cycle, Symptom, CustomSymptomType, CustomTypeCategory, DayNote } from '@/types';
 import { webDb } from './db-web';
 
 // Check if we're running in a native Capacitor environment
@@ -26,7 +26,7 @@ export interface DatabaseInterface {
   addSymptom(date: string, symptomType: string, cycleId?: number): Promise<number>;
   deleteSymptom(id: number): Promise<void>;
   getAllCustomSymptomTypes(): Promise<CustomSymptomType[]>;
-  addCustomSymptomType(name: string, category: 'physical' | 'mood'): Promise<number>;
+  addCustomSymptomType(name: string, category: CustomTypeCategory): Promise<number>;
   deleteCustomSymptomType(id: number): Promise<void>;
   getNoteByDate(date: string): Promise<DayNote | null>;
   getAllNotes(): Promise<DayNote[]>;
@@ -262,7 +262,7 @@ class NativeDatabaseService implements DatabaseInterface {
     return (result.values || []) as CustomSymptomType[];
   }
 
-  async addCustomSymptomType(name: string, category: 'physical' | 'mood'): Promise<number> {
+  async addCustomSymptomType(name: string, category: CustomTypeCategory): Promise<number> {
     const db = this.getDb();
     const result = await db.run(
       'INSERT OR IGNORE INTO custom_symptom_types (name, category) VALUES (?, ?)',
