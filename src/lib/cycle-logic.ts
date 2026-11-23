@@ -6,7 +6,8 @@ import {
   startOfDay,
 } from 'date-fns';
 import type { Cycle, PhaseType } from '@/types';
-import { PhaseType as Phase } from '@/types';
+import { PhaseType as Phase, SymptomType } from '@/types';
+import { getSportScore, isActivityEntry, isSportSession } from '@/lib/symptom-utils';
 
 const DEFAULT_CYCLE_LENGTH = 28;
 const DEFAULT_PERIOD_LENGTH = 5;
@@ -408,6 +409,8 @@ export function getSymptomsForPhaseHistory(
 
   for (const symptom of symptoms) {
     if (symptom.date < firstDate) continue;
+    // Sport and sex have their own statistics (getActivityStatsByPhase)
+    if (isActivityEntry(symptom.symptom_type)) continue;
 
     const date = parseISO(symptom.date);
     const info = model.getDayInfo(date);
@@ -433,4 +436,89 @@ export function getSymptomsForPhaseHistory(
       percentage: Math.round((cycleIds.size / recent.length) * 100),
     }))
     .sort((a, b) => b.occurrences - a.occurrences || b.days - a.days);
+}
+
+export interface PhaseActivityStats {
+  phase: PhaseType;
+  /** Recent cycles that have reached this phase so far (the denominator) */
+  cycles: number;
+  /** Average number of sport sessions in this phase per cycle */
+  sportPerCycle: number | null;
+  /** Average strength score (1-5) on sport days in this phase */
+  averageStrength: number | null;
+  /** Average number of days with sex in this phase per cycle */
+  sexPerCycle: number | null;
+}
+
+const ACTIVITY_PHASES: PhaseType[] = [Phase.MENSTRUAL, Phase.FOLLICULAR, Phase.OVULATION, Phase.LUTEAL];
+
+function roundOne(value: number): number {
+  return Math.round(value * 10) / 10;
+}
+
+/**
+ * Sport sessions, strength score and sex per phase across the last N cycles.
+ * Counts are divided by the number of cycles that have reached the phase, so
+ * the current cycle only counts towards phases it has already been through.
+ */
+export function getActivityStatsByPhase(
+  cycles: Cycle[],
+  entries: Array<{ date: string; symptom_type: string }>,
+  maxCycles: number = MAX_CYCLES,
+  now: Date = new Date()
+): PhaseActivityStats[] {
+  const empty = ACTIVITY_PHASES.map((phase) => ({
+    phase,
+    cycles: 0,
+    sportPerCycle: null,
+    averageStrength: null,
+    sexPerCycle: null,
+  }));
+  if (cycles.length === 0) return empty;
+
+  const recent = sortAscending(cycles).slice(-maxCycles);
+  const model = createCycleModel(cycles, now);
+  const today = startOfDay(now);
+
+  // Phase of every past day in the analysed cycles
+  const phaseByDate = new Map<string, PhaseType>();
+  const cyclesByPhase = new Map<PhaseType, Set<number>>(ACTIVITY_PHASES.map((p) => [p, new Set()]));
+  for (let day = parseISO(recent[0].period_start_date); day <= today; day = addDays(day, 1)) {
+    const { phase } = model.getDayInfo(day);
+    const cycle = phase ? findCycleForDate(day, recent) : null;
+    if (!phase || !cycle) continue;
+    phaseByDate.set(format(day, 'yyyy-MM-dd'), phase);
+    cyclesByPhase.get(phase)!.add(cycle.id);
+  }
+
+  const sport = new Map<PhaseType, number>();
+  const sex = new Map<PhaseType, number>();
+  const scores = new Map<PhaseType, number[]>();
+  for (const { date, symptom_type: type } of entries) {
+    const phase = phaseByDate.get(date);
+    if (!phase) continue;
+    if (isSportSession(type)) {
+      sport.set(phase, (sport.get(phase) ?? 0) + 1);
+    } else if (type === SymptomType.SEX) {
+      sex.set(phase, (sex.get(phase) ?? 0) + 1);
+    } else {
+      const score = getSportScore(type);
+      if (score > 0) scores.set(phase, [...(scores.get(phase) ?? []), score]);
+    }
+  }
+
+  return ACTIVITY_PHASES.map((phase) => {
+    const count = cyclesByPhase.get(phase)!.size;
+    const phaseScores = scores.get(phase) ?? [];
+    return {
+      phase,
+      cycles: count,
+      sportPerCycle: count > 0 ? roundOne((sport.get(phase) ?? 0) / count) : null,
+      averageStrength:
+        phaseScores.length > 0
+          ? roundOne(phaseScores.reduce((a, b) => a + b, 0) / phaseScores.length)
+          : null,
+      sexPerCycle: count > 0 ? roundOne((sex.get(phase) ?? 0) / count) : null,
+    };
+  });
 }

@@ -39,6 +39,22 @@ export enum SymptomType {
   PERIOD_PAIN_8 = 'period_pain_8',
   PERIOD_PAIN_9 = 'period_pain_9',
   PERIOD_PAIN_10 = 'period_pain_10',
+
+  // Sexual activity
+  SEX = 'sex',
+}
+
+// Built-in sports. Logged as symptoms with the type `sport_<name>`; custom
+// sports use `sport_custom_<customTypeId>`. How strong the user felt is one
+// entry per day, from `sport_score_1` (weaker than usual) to `sport_score_5`.
+export enum SportType {
+  RUNNING = 'sport_running',
+  CYCLING = 'sport_cycling',
+  SWIMMING = 'sport_swimming',
+  STRENGTH_TRAINING = 'sport_strength_training',
+  YOGA = 'sport_yoga',
+  PILATES = 'sport_pilates',
+  HIKING = 'sport_hiking',
 }
 
 // Phase Types
@@ -66,10 +82,12 @@ export interface Symptom {
   symptom_type: string;
 }
 
+export type CustomTypeCategory = 'physical' | 'mood' | 'sport';
+
 export interface CustomSymptomType {
   id: number;
   name: string;
-  category: 'physical' | 'mood';
+  category: CustomTypeCategory;
   created_at: string;
 }
 

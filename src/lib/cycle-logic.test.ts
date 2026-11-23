@@ -5,6 +5,7 @@ import {
   createCycleModel,
   getCycleHistory,
   getDaysUntilNextPeriod,
+  getActivityStatsByPhase,
   getRecentCycleLengths,
   getSymptomsForPhaseHistory,
   type CycleModel,
@@ -259,5 +260,49 @@ describe('symptom statistics', () => {
 
   it('averages pain over the days it was logged', () => {
     expect(calculateAveragePain(getSymptomsForPhaseHistory(PhaseType.MENSTRUAL, REGULAR, symptoms))).toBe(6);
+  });
+});
+
+describe('sport and sex statistics', () => {
+  const entries = [
+    symptom('2026-11-06', 'sport_running'),
+    symptom('2026-11-06', 'sport_yoga'),
+    symptom('2026-11-06', 'sport_score_2'),
+    symptom('2026-11-06', 'cramps'),
+    symptom('2026-10-09', 'sport_running'),
+    symptom('2026-10-09', 'sport_score_3'),
+    symptom('2026-10-25', 'sport_custom_1'),
+    symptom('2026-10-25', 'sport_score_5'),
+    symptom('2026-09-23', 'sex'), // ovulation of the first cycle
+    symptom('2026-10-21', 'sex'), // ovulation of the second cycle
+    symptom('2026-10-30', 'sex'),
+  ];
+  const stats = getActivityStatsByPhase(REGULAR, entries, 6, parseISO('2026-11-16'));
+  const byPhase = (phase: PhaseType) => stats.find((s) => s.phase === phase);
+
+  it('divides by the cycles that have reached each phase', () => {
+    // Day 12 of the current cycle: ovulation and luteal not reached yet
+    expect(stats.map((s) => [s.phase, s.cycles])).toEqual([
+      [PhaseType.MENSTRUAL, 3],
+      [PhaseType.FOLLICULAR, 3],
+      [PhaseType.OVULATION, 2],
+      [PhaseType.LUTEAL, 2],
+    ]);
+  });
+
+  it('averages sessions, strength and sex per phase', () => {
+    expect(byPhase(PhaseType.MENSTRUAL)).toMatchObject({ sportPerCycle: 1, averageStrength: 2.5, sexPerCycle: 0 });
+    expect(byPhase(PhaseType.FOLLICULAR)).toMatchObject({ sportPerCycle: 0, averageStrength: null, sexPerCycle: 0 });
+    expect(byPhase(PhaseType.OVULATION)).toMatchObject({ sportPerCycle: 0, averageStrength: null, sexPerCycle: 1 });
+    expect(byPhase(PhaseType.LUTEAL)).toMatchObject({ sportPerCycle: 0.5, averageStrength: 5, sexPerCycle: 0.5 });
+  });
+
+  it('keeps sport and sex out of the symptom statistics', () => {
+    const symptoms = getSymptomsForPhaseHistory(PhaseType.MENSTRUAL, REGULAR, entries).map((s) => s.symptom);
+    expect(symptoms).toEqual(['cramps']);
+  });
+
+  it('is empty without cycles', () => {
+    expect(getActivityStatsByPhase([], entries).every((s) => s.cycles === 0 && s.sportPerCycle === null)).toBe(true);
   });
 });
