@@ -13,8 +13,6 @@ import {
   startOfWeek,
   endOfWeek,
   parseISO,
-  isAfter,
-  startOfDay,
   differenceInCalendarDays,
 } from 'date-fns';
 import { Droplet, DropletOff, Egg, Heart } from 'lucide-react';
@@ -227,12 +225,6 @@ export default function CalendarView() {
 
   const cycleModel = useMemo(() => createCycleModel(cycles, parseISO(todayKey)), [cycles, todayKey]);
 
-  // Check if a date is in the future (after today)
-  const isFutureDate = useCallback((date: Date): boolean => {
-    const today = startOfDay(new Date());
-    return isAfter(startOfDay(date), today);
-  }, []);
-
   // Where today sits in the cycle
   const todayInfo = useMemo(() => cycleModel.getDayInfo(parseISO(todayKey)), [cycleModel, todayKey]);
   const todayPhase = todayInfo.phase;
@@ -268,9 +260,6 @@ export default function CalendarView() {
   }, [currentMonth]);
 
   const handleDayClick = async (date: Date) => {
-    // Don't open drawer for future dates
-    if (isFutureDate(date)) return;
-
     setSelectedDate(date);
     setIsDrawerOpen(true);
     setPendingDayType(null);
@@ -410,7 +399,7 @@ export default function CalendarView() {
 
   // Toggle a symptom for the selected date
   const handleToggleSymptom = async (symptomType: string) => {
-    if (!selectedDate || isFutureDate(selectedDate)) return;
+    if (!selectedDate) return;
 
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -450,7 +439,7 @@ export default function CalendarView() {
   // Save the pain level once the slider is released (only one level per day)
   const commitPainLevel = async () => {
     const level = painDraftRef.current;
-    if (level === null || !selectedDate || isFutureDate(selectedDate)) return;
+    if (level === null || !selectedDate) return;
     painDraftRef.current = null;
 
     try {
@@ -481,7 +470,7 @@ export default function CalendarView() {
 
   // Flow is single choice: picking one replaces the other, tapping it again clears it
   const handleFlowChange = async (flowType: string) => {
-    if (!selectedDate || isFutureDate(selectedDate)) return;
+    if (!selectedDate) return;
 
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -509,7 +498,7 @@ export default function CalendarView() {
   // Sports are multi choice. Removing the last sport of the day also removes
   // the strength score, which only makes sense together with a sport.
   const handleToggleSport = async (sportType: string) => {
-    if (!selectedDate || isFutureDate(selectedDate)) return;
+    if (!selectedDate) return;
 
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -533,7 +522,7 @@ export default function CalendarView() {
 
   // Strength score is one choice per day; tapping the active one clears it
   const handleSportScoreChange = async (score: number) => {
-    if (!selectedDate || isFutureDate(selectedDate)) return;
+    if (!selectedDate) return;
 
     try {
       const dateStr = format(selectedDate, 'yyyy-MM-dd');
@@ -756,7 +745,6 @@ export default function CalendarView() {
       >
         {calendarDays.map((day, index) => {
           const isToday = isSameDay(day, today);
-          const isFuture = isFutureDate(day);
           const shape = getDayShape(dayInfos[index], dayInfos[index - 1], dayInfos[index + 1]);
           const hasEntry = datesWithEntries.has(format(day, 'yyyy-MM-dd'));
 
@@ -764,12 +752,11 @@ export default function CalendarView() {
             <button
               key={day.toISOString()}
               onClick={() => handleDayClick(day)}
-              disabled={isFuture}
               aria-label={format(day, 'EEEE, d MMMM yyyy')}
               aria-current={isToday ? 'date' : undefined}
               className={`relative flex h-12 items-center justify-center text-sm ${
                 isToday ? 'font-bold' : 'font-medium'
-              } ${isFuture ? 'cursor-not-allowed' : ''}`}
+              }`}
             >
               <span className={`relative flex h-10 items-center justify-center ${shape}`}>
                 {format(day, 'd')}
